@@ -350,12 +350,15 @@ def save_effective_emissions(electric_modes, path, f_array):
         file_name = path + r"\gamma_ratios_ef_{}_r_{}_f_{}.npy".format(str(ei.ef), str(ei.radius), str(ei.freq_str))
         ei.save_mode_emission(file_name, f_array)
 
-def create_total_emission_graph(electric_modes, path):
+def create_total_emission_graph(electric_modes, path, f):
     total_emission = np.array([])
+    dipole_path = path + r"\dipole_spectrum.csv"
     for ei in electric_modes:
         file_name = path + r"\gamma_ratios_ef_{}_r_{}_f_{}.npy".format(str(ei.ef), str(ei.radius), str(ei.freq_str))
         try:
             emission = np.load(file_name)
+            dipoles = load_dipole_spectrum(dipole_path, f)
+            print("Mode - {}THz - Purcell Factor = {}".format(ei.freq_str, calculate_purcell_factor(emission, dipoles, f)))
         except:
             "Couldn't load the emission"
             emission = 0
@@ -379,24 +382,25 @@ def load_dipole_spectrum(path, f):
 
 def plot_emission_spectrum(electric_modes, path, f):
     dipole_path = path + r"\dipole_spectrum.csv"
-    total_emission = create_total_emission_graph(electric_modes, path)
+    total_emission = create_total_emission_graph(electric_modes, path, f)
     dipoles = load_dipole_spectrum(dipole_path, f)
     central_freqs = np.array([Ei.frequency for Ei in electric_modes])
     plt.figure()
-    plt.plot(f / 1e12, total_emission, 'm', f / 1e12, dipoles, 'r')
-    plt.title('Emission Spectrum with $P_F^{eff}$' + '= {}'.format(calculate_purcell_factor(total_emission, dipoles, f)))
-    plt.ylabel('Spectrum [a.u]')
-    plt.xlabel('Frequnecy [THz]')
-    plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene"])
-    plt.figure()
-
-    plt.title(r'Structure Emission for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius))
-    plt.plot(f / 1e12, total_emission)
+    plt.plot(f / 1e12, total_emission, f / 1e12, dipoles, 'm')
     for cf in central_freqs:
         plt.axvline(x=cf / 1e12, linestyle=':', linewidth=0.5, c='k')
-    plt.xlabel('Frequency [THz]')
+    plt.title('Emission Spectrum for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius) +' with $P_F^{eff}$' + '= {}'.format(calculate_purcell_factor(total_emission, dipoles, f)))
     plt.ylabel('Spectrum [a.u]')
-    plt.legend(["Total emission with graphene", "Modes frequencies"])
+    plt.xlabel('Frequnecy [THz]')
+    plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene", "Modes frequencies"])
+    #plt.figure()
+
+    #plt.title(r'Structure Emission for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius))
+    #plt.plot(f / 1e12, total_emission)
+
+    #plt.xlabel('Frequency [THz]')
+    #lt.ylabel('Spectrum [a.u]')
+    #plt.legend(["Total emission with graphene", "Modes frequencies"])
     plt.show()
 
 def calculate_purcell_factor(total_emission, dipole_emission, f):

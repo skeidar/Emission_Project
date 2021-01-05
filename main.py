@@ -22,8 +22,9 @@ if __name__ == "__main__":
     #plt.plot(f_array, total_emission)
     #plt.show()
 
+    #create_total_emission_graph(E, path, f_array)
     plot_emission_spectrum(E, path, f_array)
-    for Ei in E:
-        Ei.normalize()
-        Ei.scatter_plot_3d()
+    #for Ei in E:
+        #Ei.normalize()
+        #Ei.scatter_plot_3d()
 
