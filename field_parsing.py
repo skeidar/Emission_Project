@@ -1,5 +1,6 @@
 import scipy.io as sio
 from scipy import interpolate
+from scipy import constants as cn
 #import numpy as np
 import plotly.express as px
 import pandas as pd
@@ -28,12 +29,52 @@ class ElectricMode(object):
         self.e_field = np.array([np.array([sample[3], sample[4], sample[5]]) for sample in self.samples]) * 1e-6
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
         self.gamma_ratio = None
+        self._eps = np.load(r"C:\Shaked\Technion\QCL_Project\Wavefunctions\structure_epsilon.npy", allow_pickle=True)[()]
 
     def compute_norm(self):
         return irregular_integration_delaunay_3d(self.points, (self.e_norms) ** 2)
 
-    def normalize(self):
+    def naive_normalize(self):
         self.e_field = self.e_field / (self.compute_norm()) ** 0.5
+        self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
+
+    def normalize(self):
+        mode_energy = cn.physical_constants['Planck constant in eV/Hz'][0] * self.frequency
+        bulk_dispersion = self._eps['bulk_eps']
+        active_dispersion = self._eps['total_eps']
+        energy = self._eps['omega']
+        omega = energy / cn.physical_constants['reduced Planck constant in eV s'][0]
+
+        bulk_interp = interpolate.interp1d(energy, bulk_dispersion)
+        active_interp = interpolate.interp1d(energy, active_dispersion)
+        bulk_eps_r = bulk_interp(mode_energy)
+        active_eps_r = active_interp(mode_energy)
+
+        dw = omega[1] - omega[0]
+        bulk_eps_derivative = np.gradient(omega * np.sqrt(np.real(bulk_dispersion))) / dw
+        active_eps_derivative = np.gradient(omega * np.sqrt(np.real(active_dispersion))) / dw
+
+        d_bulk_interp = interpolate.interp1d(energy, bulk_eps_derivative)
+        d_active_interp = interpolate.interp1d(energy, active_eps_derivative)
+        d_bulk_eps_r = d_bulk_interp(mode_energy)
+        d_active_eps_r = d_active_interp(mode_energy)
+
+        z = self.points[:, 2]
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
+        d = dipole_locations(z_linspace)
+        effective_eps = 0
+        effective_derivative_eps = 0
+        for zi in range(len(z_linspace)):
+            if d[zi]:
+                effective_eps += active_eps_r
+                effective_derivative_eps += d_active_eps_r
+            else:
+                effective_eps += bulk_eps_r
+                effective_derivative_eps += d_bulk_eps_r
+        effective_eps /= len(z_linspace)
+        effective_derivative_eps /= len(z_linspace)
+        normalization_results = 1 / (np.sqrt(np.real(effective_eps)) * effective_derivative_eps)
+        self.e_field = self.e_field * (normalization_results / self.compute_norm()) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
 
     def scatter_plot_3d(self, func_array=None, func_name='$\Gamma_m(r,\omega_m)/\Gamma_0$ [1]', as_log=True):
@@ -60,7 +101,7 @@ class ElectricMode(object):
         rho_values = np.sqrt(self.points[:,0] ** 2 + self.points[:,1] ** 2)
         if self.gamma_ratio is None:
             # add mode's Q 
-            gamma = gamma_m(self.e_field[:,2], 10.28, self.frequency, self.frequency)
+            gamma = gamma_m(self.e_field[:,2], self.Q, self.frequency, self.frequency)
             self.gamma_ratio = gamma
         else:
             # add mode's Q 
@@ -351,20 +392,26 @@ def save_effective_emissions(electric_modes, path, f_array):
         ei.save_mode_emission(file_name, f_array)
 
 def create_total_emission_graph(electric_modes, path, f):
+
     total_emission = np.array([])
     dipole_path = path + r"\dipole_spectrum.csv"
+    factors = []
     for ei in electric_modes:
         file_name = path + r"\gamma_ratios_ef_{}_r_{}_f_{}.npy".format(str(ei.ef), str(ei.radius), str(ei.freq_str))
         try:
+
             emission = np.load(file_name)
             dipoles = load_dipole_spectrum(dipole_path, f)
-            print("Mode - {}THz - Purcell Factor = {}".format(ei.freq_str, calculate_purcell_factor(emission, dipoles, f)))
         except:
             "Couldn't load the emission"
             emission = 0
+        factors.append((ei.freq_str, calculate_purcell_factor(emission, dipoles, f)))
         if len(total_emission) == 0:
             total_emission = np.zeros(len(emission))
         total_emission += emission
+        total_purcell = calculate_purcell_factor(total_emission, dipoles, f)
+    for fact in factors:
+        print("Mode {} - Fp = {} - Relative {}".format(fact[0], fact[1], np.round(fact[1] / total_purcell * 100, 2)))
     return total_emission
 
 
@@ -389,10 +436,11 @@ def plot_emission_spectrum(electric_modes, path, f):
     plt.plot(f / 1e12, total_emission, f / 1e12, dipoles, 'm')
     for cf in central_freqs:
         plt.axvline(x=cf / 1e12, linestyle=':', linewidth=0.5, c='k')
-    plt.title('Emission Spectrum for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius) +' with $P_F^{eff}$' + '= {}'.format(calculate_purcell_factor(total_emission, dipoles, f)))
+    plt.title('Emission Spectrum for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius) +' with $F_P^{eff}$' + '= {}'.format(calculate_purcell_factor(total_emission, dipoles, f)))
     plt.ylabel('Spectrum [a.u]')
     plt.xlabel('Frequnecy [THz]')
-    plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene", "Modes frequencies"])
+    #plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene", "Modes frequencies"])
+    plt.legend(['Total spectral enhancement', 'Emitters taken from APL paper', 'Modes frequencies'])
     #plt.figure()
 
     #plt.title(r'Structure Emission for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius))
@@ -405,5 +453,18 @@ def plot_emission_spectrum(electric_modes, path, f):
 
 def calculate_purcell_factor(total_emission, dipole_emission, f):
     normalized_dipole_spect = np.array(dipole_emission / regular_integration_1d(dipole_emission, f))
-    return regular_integration_1d(normalized_dipole_spect * total_emission, f)
+    return int(np.round(regular_integration_1d(normalized_dipole_spect * total_emission, f)))
 
+def generate_purcell_heatmap():
+    import seaborn as sns
+
+    Index = ['0.15', '0.2', '0.25']
+    Cols = ['2.2', '2.6', '3.0']
+    data = [[17341, None, 13968],[42250, 29139, 27090],[39525, 30757, 31335]]
+    df = pd.DataFrame(data, index=Index, columns=Cols)
+
+    sns.heatmap(df, annot=True, cmap='YlOrRd', fmt='.0f')
+    plt.title("Effective Purcell Enhancement Summary")
+    plt.xlabel('Radius [$\mu$m]')
+    plt.ylabel('Graphene $E_f$ [eV]')
+    plt.show()

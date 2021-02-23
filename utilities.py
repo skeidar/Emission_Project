@@ -77,7 +77,7 @@ def regular_integration_1d(samples, z):
         delta = z[1] - z[0]
     else:
         delta = 0
-    result = sum([samples[i] * delta for i in range(len(samples) -1)])
+    result = sum([samples[i] * delta for i in range(len(samples) -1)]) # -1?
     return result
         
         
