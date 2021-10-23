@@ -1,18 +1,21 @@
 import scipy.io as sio
 from scipy import interpolate
+from scipy.interpolate import RegularGridInterpolator as rgi
 from scipy import constants as cn
-#import numpy as np
+import numpy as np
 import plotly.express as px
 import pandas as pd
 from matplotlib import pyplot as plt
 from utilities import *
+from wavefunc import load_wavefunction, normalize_wv
 import csv
 from tqdm import tqdm
 
 class ElectricMode(object):
     def __init__(self, path, ef, radius, frequency, Q):
-        self.ef = np.round(float(ef) * 6.24150913* 1e18,3)
+        self.ef = np.round(float(ef) * 6.24150913 * 1e18,3)
         self.radius = float(radius)
+        self.disk_area = np.pi * (self.radius ** 2)
         self.frequency = float(frequency)
         frequency_str = str(np.round(float(frequency[:-3]),2))
         if frequency_str[-2] == '.':
@@ -30,6 +33,10 @@ class ElectricMode(object):
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
         self.gamma_ratio = None
         self._eps = np.load(r"C:\Shaked\Technion\QCL_Project\Wavefunctions\structure_epsilon.npy", allow_pickle=True)[()]
+        self.bulk_eps_r = 1
+        self.active_eps_r = 1
+        self.d_bulk_eps_r = 1
+        self.d_active_eps_r = 1
 
     def compute_norm(self):
         return irregular_integration_delaunay_3d(self.points, (self.e_norms) ** 2)
@@ -38,7 +45,8 @@ class ElectricMode(object):
         self.e_field = self.e_field / (self.compute_norm()) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
 
-    def normalize(self):
+    def use_disperssion(self):
+        # calcualting the effective epsilon and derivative of epsilon:
         mode_energy = cn.physical_constants['Planck constant in eV/Hz'][0] * self.frequency
         bulk_dispersion = self._eps['bulk_eps']
         active_dispersion = self._eps['total_eps']
@@ -49,6 +57,8 @@ class ElectricMode(object):
         active_interp = interpolate.interp1d(energy, active_dispersion)
         bulk_eps_r = bulk_interp(mode_energy)
         active_eps_r = active_interp(mode_energy)
+        self.bulk_eps_r = bulk_eps_r
+        self.active_eps_r = active_eps_r
 
         dw = omega[1] - omega[0]
         bulk_eps_derivative = np.gradient(omega * np.sqrt(np.real(bulk_dispersion))) / dw
@@ -58,7 +68,16 @@ class ElectricMode(object):
         d_active_interp = interpolate.interp1d(energy, active_eps_derivative)
         d_bulk_eps_r = d_bulk_interp(mode_energy)
         d_active_eps_r = d_active_interp(mode_energy)
+        self.d_bulk_eps_r = d_bulk_eps_r
+        self.d_active_eps_r = d_active_eps_r
 
+    def normalize(self):
+        self.use_disperssion()
+        active_eps_r = self.active_eps_r
+        bulk_eps_r = self.bulk_eps_r
+        d_active_eps_r = self.d_active_eps_r
+        d_bulk_eps_r = self.d_bulk_eps_r
+        # using the effective epsilon for the normalization
         z = self.points[:, 2]
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
         d = dipole_locations(z_linspace)
@@ -244,7 +263,7 @@ class ElectricMode(object):
         plt.subplots_adjust(hspace=0.3)
         plt.show()
 
-    def calculate_effective_rate(self, z, u_z, f):
+    def calculate_effective_rate(self, z, u_z, f, gamma_func=None):
         # step 1 - 2d integration over xy to obtain gamma(z). 
         #        step 1a - collecting every xy values in a certain z (z is rounded)
         #        step 1b - integration for every z using triangulation
@@ -253,12 +272,53 @@ class ElectricMode(object):
 
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
         dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
-
-        gamma_func = gamma_m(u_z,  self.Q, f, self.frequency)
+        if gamma_func is None:
+            gamma_func = gamma_m(u_z,  self.Q, f, self.frequency)
+        """
         z_dict = create_dict_by_z(self.points, gamma_func)
 
-        xy_integrations_per_z_slice =  np.array([[z, irregular_integration_delaunay_2d(z_dict[z])] for z in z_dict.keys()])
+        xy_integrations_per_z_slice = np.array([[zi, irregular_integration_delaunay_2d(z_dict[zi]) / self.disk_area] for zi in z_dict.keys()])
         interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:,0]), np.array(xy_integrations_per_z_slice[:,1]), kind='cubic')
+        interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
+        """
+        interpolated_z_gamma = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_func)
+        gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
+
+        return gamma_effective
+
+    def calculate_effective_rate2(self, z, u_z, f, gamma_func=None):
+        # step 1 - 2d integration over xy to obtain gamma(z).
+        #        step 1a - calculating the mean value at a certain z
+        #        step 1b - integration for every z using triangulation
+        # step 2 - interpolation over z
+        # step 3 - 1d integration over gamma(z)*Y(z)dz
+
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
+        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
+        if gamma_func is None:
+            gamma_func = gamma_m(u_z,  self.Q, f, self.frequency)
+        z_dict = create_dict_by_z(self.points, gamma_func)
+
+        xy_integrations_per_z_slice = np.array([[zi, np.mean(np.array(z_dict[zi])[:, 2])] for zi in z_dict.keys()])
+        interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:,0]), np.array(xy_integrations_per_z_slice[:,1]), kind='linear')
+
+        interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
+        gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
+        gamma_effective = regular_integration_1d(1 * interpolated_z_gamma, z_linspace)
+        return gamma_effective
+
+    def calculate_AdotP_effective_rate(self, z, u_z, f, f_ij, psi_i, psi_f, z_wv):
+        # for the A dot P hamiltonian
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
+        if type(f_ij) is list:
+            pass
+        else:
+            gamma_func = non_approximated_gamma_m(u_z, self.Q, f_ij, f, psi_i, psi_f, z_wv)
+        z_dict = create_dict_by_z(self.points, gamma_func)
+
+        xy_integrations_per_z_slice = np.array([[z, irregular_integration_delaunay_2d(z_dict[z])] for z in z_dict.keys()])
+        interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:, 0]), np.array(xy_integrations_per_z_slice[:, 1]), kind='cubic')
 
         interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
         gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
@@ -300,6 +360,176 @@ class ElectricMode(object):
         gammas = np.array([self.calculate_effective_rate(z, u_z, f[i]) for i in tqdm(range(len(f)))])
         np.save(file_name, gammas)
 
+    def try_AdotP(self, z_wv, psi_i, psi_f):
+        z = self.points[:, 2]
+        u_z = self.e_field[:, 2]
+        gamma_max = self.calculate_effective_rate(z, u_z, self.frequency)
+        adotp_max = self.calculate_AdotP_effective_rate(z, u_z, self.frequency, psi_i, psi_f, z_wv)
+        print(gamma_max / adotp_max, gamma_max, adotp_max)
+
+    def save_AdotP_emission(self, wv_path, file_name=None, f_array=None):
+        z = self.points[:, 2]
+        u_z = self.e_field[:, 2]
+
+        wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+        z_wv = z_wv * 1e-9
+        PER = 6
+        """
+        50.50.50.50
+        init_states = [0, PER + 2]  # states 0, 8
+        FINAL_STATE = PER + 1  # state 7
+        """
+        init_states = [1,2]  # states 0, 8
+        FINAL_STATE = 0  # state 7
+        gamma_rates = []
+
+        for INIT_STATE in init_states:
+            psi_i = normalize_wv(wavetot[:, INIT_STATE], z_wv)
+            psi_f = normalize_wv(wavetot[:, FINAL_STATE], z_wv)
+            energy_i = levelstot[INIT_STATE]
+            energy_f = levelstot[FINAL_STATE]
+
+            #plt.plot(0.3 * wavetot[:,INIT_STATE] ** 2 + levelstot[INIT_STATE])
+            #plt.plot(0.3 * wavetot[:, FINAL_STATE] ** 2 + levelstot[FINAL_STATE])
+            #plt.show()
+            f_ij = abs(energy_i - energy_f) * cn.e / cn.h
+            print("d = {}e*m".format(regular_integration_1d(psi_i * z_wv * psi_f, z_wv)))
+            print("E = {}meV".format(abs(energy_f - energy_i) / 1e-3))
+            print("f = {}THz".format(f_ij / 1e12))
+            if f_array is None:
+                f = [f_ij]
+            else:
+                f = f_array
+            adotp_gamma = [self.calculate_AdotP_effective_rate(z, u_z, f_ij, f[i], psi_i, psi_f, z_wv) for i in tqdm(range(len(f)))]
+            gammas = np.array([self.calculate_effective_rate(z, u_z, f[i]) for i in tqdm(range(len(f)))])
+            gamma_rates.append(adotp_gamma)
+        print("A = {}".format(gamma_rates))
+        print("B = {}".format(gammas))
+
+    def average_field(self):
+        points = self.points
+        z = points[:,2]
+        E_z = self.e_field[:,2]
+
+        ones_array = create_dict_by_z(points, [1] * len(points)) # normalization
+        xy_areas = [irregular_integration_delaunay_2d(ones_array[zi]) for zi in ones_array.keys()]
+        A = np.mean(xy_areas)
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+        z_dict = create_dict_by_z(points, E_z)
+        xy_integrations_per_z_slice = np.array([[zi, irregular_integration_delaunay_2d(z_dict[zi]) / A] for zi in z_dict.keys()])
+        interpolated_z_field_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:, 0]), np.array(xy_integrations_per_z_slice[:, 1]), kind='linear')
+        averaged_z_field = interpolated_z_field_func(z_linspace)
+
+        return averaged_z_field, z_linspace
+
+
+    def approximations_comparison(self, wv_path, f=None):
+        PLOT_Z_RATE = False
+        TOTAL_Z_RATE = True
+        SANITY = True
+        PLOT_DIPOLE = False
+
+        init_states = [2]  # states 0, 8
+        FINAL_STATE = 0  # state 7
+        f_m = self.frequency
+        Q = self.Q
+        eps_r = self.d_active_eps_r
+        k = 2 * np.pi * f_m * np.sqrt(self.active_eps_r) / cn.c
+        e = cn.e
+        PERIODS = range(12)
+        PER_LEN = 30.68e-9
+
+
+        z = self.points[:, 2]
+        self.normalize()
+        u_z = self.e_field[:, 2]
+        wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+        z_wv = z_wv * 1e-9
+
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
+        averaged_u_z, _ = self.average_field()
+
+        dipole_z_density = generate_dipole_along_z(dipole_locations(z_linspace), z_linspace)
+        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
+        d_interp = interpolate.interp1d(z_linspace, dipole_z_density, kind='linear',bounds_error=False, fill_value=0)
+
+
+
+        #for test purposes:
+        if f == None:
+            f = np.array([f_m])
+
+        for INIT_STATE in init_states:
+            psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
+            psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+            energy_i = levelstot[INIT_STATE]
+            energy_f = levelstot[FINAL_STATE]
+            f_ij = abs(energy_i - energy_f) * cn.e / cn.h
+            print("f_ij = {}THz".format(f_ij / 1e12))
+            print("Delta E = {}eV".format(abs(energy_i - energy_f)))
+            d = e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+            print("d = {}".format(d / e * 1e9))
+            only_momentum_product = regular_integration_1d(np.conj(psi_f) * np.gradient(psi_i, z_wv), z_wv)
+            with_exponent_product = regular_integration_1d(np.conj(psi_f) * np.exp(1j * k * z_wv) * np.gradient(psi_i, z_wv), z_wv)
+            #complete_non_approx_prod = inner_prodcut_with_field(z, u_z, z_wv, np.conj(psi_f) * np.gradient(psi_i, z_wv))
+            #complete_exponent_prod = inner_prodcut_with_field(z, u_z, z_wv, np.conj(psi_f) * np.gradient(psi_i * np.exp(1j * k * z_wv)))
+
+            if PLOT_DIPOLE:
+                for per in PERIODS:
+                    #plt.plot(z_wv + per * PER_LEN, psi_i,'r', z_wv + per * PER_LEN, psi_f, 'g')
+                    psi_prod = np.gradient(psi_i) * psi_f
+                    plt.plot(z_wv + per * PER_LEN, psi_prod, 'g')
+                    ddd = d_interp(z_wv + per * PER_LEN)
+                    plt.plot(z_wv + per * PER_LEN, ddd / max(ddd) * max(psi_prod) * 2, 'b')
+                plt.show()
+
+            if PLOT_Z_RATE:
+                plt.plot(z, np.log(Gamma_m(u_z,d, Q, f_ij, f_m)))
+                plt.plot(z, np.log(non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m)))
+                plt.plot(z, np.log(non_dipole_Gamma_m(u_z, with_exponent_product, Q, f_ij, f_m)))
+                plt.legend(['Ed', 'Ap', 'Ape^(ikz)'])
+                plt.show()
+            if TOTAL_Z_RATE:
+                electric_dipole_result = self.calculate_effective_rate(z, np.ones(np.shape(u_z)), f, Gamma_m(u_z, d, Q, f_ij, f_m, eps_r))
+                non_dipole_result = self.calculate_effective_rate(z, np.ones(np.shape(u_z)), f, non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m, eps_r))
+                spont_results = self.calculate_effective_rate(z, u_z, f, np.ones(np.shape(u_z)) * spontaneous_emission(d, f_ij))
+
+                self.plot_gamma(z, Gamma_m(u_z, d, Q, f_ij, f_m, eps_r))
+                self.plot_gamma(z, non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m, eps_r))
+                #self.plot_gamma(z, np.ones(np.shape(u_z)) * spontaneous_emission(d, f_ij))
+                plt.legend(['E dot d', 'A dot p'])
+                #plt.show()
+
+                #with_exponent_result = self.calculate_effective_rate(z, u_z, f, non_dipole_Gamma_m(u_z, with_exponent_product, Q, fi, f_m))
+                #electric_dipole_result = regular_integration_1d(Gamma_m(uz_interp * dipole_density,d, Q, f_ij, f_m), z_linspace)
+                #non_dipole_result = regular_integration_1d(non_dipole_Gamma_m(uz_interp * dipole_density, only_momentum_product, Q, f_ij, f_m), z_linspace)
+
+                p = self.points
+                complete_non_approx_result = sum([inner_product_field_gamma(inner_prodcut_with_field(p, np.ones(np.shape(u_z)), z_wv + per * PER_LEN, np.conj(psi_f) * np.gradient(psi_i, z_wv)), Q, f_ij, f_m, eps_r) for per in PERIODS])
+                complete_exponent_result = sum([inner_product_field_gamma(inner_prodcut_with_field(p, np.ones(np.shape(u_z)) * np.exp(1j * k * z), z_wv + per * PER_LEN, np.conj(psi_f) * np.gradient(psi_i, z_wv)), Q, f_ij, f_m, eps_r) for per in PERIODS])
+
+                print("E dot d = {}".format(1/electric_dipole_result))
+                print("A dot p = {}".format(1/non_dipole_result))
+                #print("A dot p dot exp= {}".format(with_exponent_result))
+                print("Inner prod A dot p = {}".format(1/complete_non_approx_result))
+                print("Inner prod A dot p dot exp= {}".format(1/complete_exponent_result))
+                print("spontaneous rate = {}".format(1/spont_results))
+            if SANITY:
+                #sanity check:
+                print("d^2 / overlaps^2 = {}".format((d / only_momentum_product)**2))
+                w_m = 2 * np.pi * f_m
+                print("E dot d * (e^2*pi^2*hbar^2/2m^2w^2)  / A dot p = {}".format(electric_dipole_result * ((cn.e ** 2 * np.pi * cn.hbar **2) / (4 * (cn.m_e * 0.067) ** 2 * (2 * np.pi * f_ij) ** 2)) / non_dipole_result))
+                mass = 0.067 * cn.m_e
+                Mt_squared = (abs(d) * 2 * mass / cn.e) ** 2 * 2 * f_ij / cn.epsilon_0
+                print("Transition Matrix (?): {}".format(Mt_squared * 2 / mass * 6.2414e18 * 1e3))
+    def plot_gamma(self, z, gamma_func):
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+        interpolated_z_gamma = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_func)
+        plt.plot(z_linspace * 1e9, 1/interpolated_z_gamma * 1e6)
+        plt.title("Emission rate vs z")
+        plt.xlabel('z [nm]')
+        plt.ylabel('Rate [us]')
+
 
 def load_modes(folder_path, mode_frequeny_THz=None):
     DATA_START = 5
@@ -337,9 +567,9 @@ def dipole_locations(z_linspace):
         dipole_width = 3e-9
         LAYER4 = 5.35e-9
         LAYER5 = 3.38e-9
-        # sum * 12 is larger than the device's z-lenght
-        TOTAL_LAYERS = LAYER1  + LAYER2 + LAYER3 + LAYER4 + LAYER5 + dipole_width
-        dipole_layer_offset =  z_linspace.max() - (LAYER1  + LAYER2 + LAYER3)
+        # sum * 12 is larger than the device's z-length
+        TOTAL_LAYERS = LAYER1 + LAYER2 + LAYER3 + LAYER4 + LAYER5 + dipole_width
+        dipole_layer_offset = z_linspace.max() - (LAYER1 + LAYER2 + LAYER3)
         d = np.zeros(np.shape(z_linspace))
 
         count = int(round((z_linspace.max() - z_linspace.min()) / (TOTAL_LAYERS)))
@@ -360,20 +590,54 @@ def generate_dipole_density(d, z_linspace, points):
         ones_array = create_dict_by_z(points, [1] * len(points)) # normalization
         xy_areas = [irregular_integration_delaunay_2d(ones_array[z]) for z in ones_array.keys()]
         A = np.mean(xy_areas)
+        A = 1
         # the dipole normalized density isn't affected by the dipole strength
-        dipole_density = d / (regular_integration_1d(d, z_linspace) * A)
+        dipole_density = d #/ (regular_integration_1d(d, z_linspace) * A)
         return dipole_density
 
+def generate_dipole_along_z(d, z_linspace):
+    # the dipole normalized density isn't affected by the dipole strength
+    dipole_density = d / (regular_integration_1d(d, z_linspace))
+    return dipole_density
 
-def Gamma_m(u, d, Q, f, f_m):
-    hbar = 1.0545711818e-34
-    eps_0 = 8.85418781762039e-12
-    eps_r = 3.5 # typical value
+def spontaneous_emission(d, f):
+    hbar = cn.hbar #1.0545711818e-34
+    eps_0 = cn.epsilon_0 #8.85418781762039e-12
+    eps_r = 1 #3.5 # typical value
+    c = cn.speed_of_light
+    w = 2 * np.pi * f
+    res = ((w ** 3) * (abs(d) ** 2)) / (3 * np.pi * eps_0 * eps_r * hbar * (c ** 3))
+    return res
+
+def Gamma_m(u, d, Q, f, f_m, eps_r):
+    hbar = cn.hbar #1.0545711818e-34
+    eps_0 = cn.epsilon_0 #8.85418781762039e-12
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
     res = (2 * (abs(d) ** 2) * (abs(u) ** 2) * 2 * Q * w_m * w) / ((hbar * eps_0 * eps_r * np.pi) * (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2))
     return res
 
+def non_dipole_Gamma_m(u, prod, Q, f, f_m, eps_r):
+    e = cn.e
+    m = cn.m_e * 0.067
+    hbar = cn.hbar
+    eps_0 = cn.epsilon_0
+    eps_r = 1
+    w = 2 * np.pi * f
+    w_m = 2 * np.pi * f_m
+    res = ((e / m) ** 2) * (2 * Q * hbar / (w * eps_0 * eps_r)) * (2 / np.pi) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * (abs(u) ** 2) * (abs(prod) ** 2)
+    return res
+
+def inner_product_field_gamma(prod, Q, f, f_m, eps_r):
+    e = cn.e
+    m = cn.m_e * 0.067
+    hbar = cn.hbar
+    eps_0 = cn.epsilon_0
+    eps_r = 1
+    w = 2 * np.pi * f
+    w_m = 2 * np.pi * f_m
+    res = ((e / m) ** 2) * (2 * Q * hbar / (w * eps_0 * eps_r)) * (2 / np.pi) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * (abs(prod) ** 2)
+    return res
 
 def gamma_m(u, Q, f, f_m):
     # the relation between Gamma_m / Gamma_0
@@ -383,6 +647,33 @@ def gamma_m(u, Q, f, f_m):
     res = 12 * (c ** 3) * Q * w_m * (abs(u) ** 2) / ((w ** 2) * (4 * (Q ** 2) * ((w - w_m) ** 2) + (w_m ** 2)))
     return res
 
+def non_approximated_gamma_m(u, Q, f, f_m, psi_i, psi_f, z_wv):
+    # the relation between Gamma_m / Gamma_0 - for the A dot P hamiltonian
+    w = 2 * np.pi * f
+    w_m = 2 * np.pi * f_m
+    c = cn.speed_of_light
+    c = 3e8
+    hbar = cn.hbar
+    hbar = 1.054e-34
+    e = cn.e
+    e = 1.6e-19
+    m_e = cn.electron_mass
+    m_e = 9.1e-31
+    d = e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+
+    inner_product_1 = regular_integration_1d(np.conj(psi_i) * np.gradient(psi_f, z_wv), z_wv)
+    inner_product_2 = regular_integration_1d(np.conj(psi_f) * np.gradient(psi_i, z_wv), z_wv)
+
+    #plt.plot(z_wv, psi_i * np.gradient(psi_f, z_wv))
+    #plt.plot(z_wv, psi_f * np.gradient(psi_i, z_wv))
+    #plt.show()
+
+    wavefunctions_term = abs(inner_product_2) ** 2 #inner_product_1 * inner_product_2
+    consts_term = ((e / m_e) ** 2) * (6 * np.pi * Q * (c ** 3) * (hbar ** 2)) / ((abs(d) ** 2) * (w ** 4)) / 2
+    lorentzian_term = w_m * (abs(u) ** 2) / ((4 * (Q ** 2) * ((w - w_m) ** 2) + (w_m ** 2)))
+    res = consts_term * lorentzian_term * wavefunctions_term
+
+    return res
 
 def save_effective_emissions(electric_modes, path, f_array):
     for i, ei in enumerate(electric_modes):
@@ -392,7 +683,6 @@ def save_effective_emissions(electric_modes, path, f_array):
         ei.save_mode_emission(file_name, f_array)
 
 def create_total_emission_graph(electric_modes, path, f):
-
     total_emission = np.array([])
     dipole_path = path + r"\dipole_spectrum.csv"
     factors = []
@@ -460,7 +750,8 @@ def generate_purcell_heatmap():
 
     Index = ['0.15', '0.2', '0.25']
     Cols = ['2.2', '2.6', '3.0']
-    data = [[17341, None, 13968],[42250, 29139, 27090],[39525, 30757, 31335]]
+    #data = [[17341, None, 13968],[42250, 29139, 27090],[39525, 30757, 31335]]
+    data = [[4206, None, 3399], [2926, 2009, 1872], [2743, 2124, 2167]]
     df = pd.DataFrame(data, index=Index, columns=Cols)
 
     sns.heatmap(df, annot=True, cmap='YlOrRd', fmt='.0f')
@@ -468,3 +759,14 @@ def generate_purcell_heatmap():
     plt.xlabel('Radius [$\mu$m]')
     plt.ylabel('Graphene $E_f$ [eV]')
     plt.show()
+
+def averaging_over_area(points, area, z_linspace, gamma_func, kind=None):
+    if kind is None:
+        kind = 'cubic'
+    z_dict = create_dict_by_z(points, gamma_func)
+    xy_integrations_per_z_slice = np.array(
+        [[zi, irregular_integration_delaunay_2d(z_dict[zi]) / area] for zi in z_dict.keys()])
+    interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:, 0]),
+                                                     np.array(xy_integrations_per_z_slice[:, 1]), kind=kind)
+    interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
+    return interpolated_z_gamma
