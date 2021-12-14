@@ -81,6 +81,17 @@ class ElectricMode(object):
         z = self.points[:, 2]
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
         d = dipole_locations(z_linspace)
+        effective_eps = 0
+        effective_derivative_eps = 0
+        for zi in range(len(z_linspace)):
+            if d[zi]:
+                effective_eps += active_eps_r
+                effective_derivative_eps += d_active_eps_r
+            else:
+                effective_eps += bulk_eps_r
+                effective_derivative_eps += d_bulk_eps_r
+        effective_eps /= len(z_linspace)
+        effective_derivative_eps /= len(z_linspace)
         normalization_results = 1 / (np.sqrt(np.real(effective_eps)) * effective_derivative_eps)
         self.e_field = self.e_field * (normalization_results / self.compute_norm()) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
