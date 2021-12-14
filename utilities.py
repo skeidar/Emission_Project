@@ -5,6 +5,9 @@ from scipy.interpolate import RegularGridInterpolator as rgi
 from scipy.interpolate import griddata
 from matplotlib import pyplot as plt
 from tqdm import tqdm
+import plotly.express as px
+import pandas as pd
+import time
 
 def complex_3d_norm(x,y,z):
     return np.sqrt(np.dot((x,y,z), np.conj((x,y,z))))
@@ -49,15 +52,30 @@ def create_dict_by_z(points, func):
             points_dict[z_rounded] = [(x,y,func[i])]
     return points_dict
     
+def cyclinder_grid_3d_integration(points, func):
+    func_z_dict = create_dict_by_z(points,func)
+    area_list = list()
+    for zi in func_z_dict.keys():
+        xy_area = irregular_integration_delaunay_2d(func_z_dict[zi])
+        area_list.append([xy_area, zi])
+    res = 0
+    for i in range(len(area_list)):
+        if i == len(area_list) - 1:
+            break
+        delta_z = area_list[i+1][1] - area_list[i][1]
+        res += delta_z * area_list[i][0]
+    return res
 
-def irregular_integration_delaunay_3d(points, func):
+
+def irregular_integration_delaunay_3d(points, func, plot_tetras=False):
     deb = ssp.Delaunay(points)
     tetrahedrons = deb.points[deb.simplices]
 
     f_dict = create_func_dict(points, func)
-
+    zero_volume_count = 0
     res = 0
-    for tetra in tetrahedrons:
+
+    for k, tetra in enumerate(tetrahedrons):
         a = tetra[0,:]
         b = tetra[1,:]
         c = tetra[2,:]
@@ -65,7 +83,23 @@ def irregular_integration_delaunay_3d(points, func):
         v = tetrahedron_volume(a, b, c, d)
         l = [a, b, c, d]
         dv = v * sum([f_dict[p[0]][p[1]][p[2]] for p in l]) / 4
+
         res += dv
+        if v == 0:
+            zero_volume_count +=1
+        if plot_tetras:
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 1, 1, projection='3d')
+            # plotting the six edges of the tetrahedron
+            for ij in [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]:
+               ax.plot3D(tetra[ij, 0], tetra[ij, 1], tetra[ij, 2])
+            #print(tetra[:,0],tetra[:,1],tetra[:,2])
+
+            plt.show()
+
+
+
+    #print("Zero volumes % = {}".format(zero_volume_count / len(tetrahedrons) * 100))
 
     return res
 
@@ -74,8 +108,7 @@ def irregular_integration_delaunay_2d(points_func_tuple):
     func = [p[2] for p in points_func_tuple]
     f_dict = create_func_dict(points, func)
     deb = ssp.Delaunay(points[:,:2])
-    triangles = deb.points[deb.simplices] 
-    
+    triangles = deb.points[deb.simplices]
     res = 0
     for tri in triangles:
         a = tri[0,:]
@@ -102,18 +135,25 @@ def interp1d_complex_function(original_range, func, new_range , kind='linear', b
     interp_func = real_interp(new_range) + 1j * imag_interp(new_range)
     return interp_func
 
-def inner_prodcut_with_field(points, field, z_func, func):
-    z_dict = create_dict_by_z(points, field)
-    #mean_field = np.array([[zi, np.mean([z_dict[zi][i][2] for i in range(len(z_dict[zi]))])] for zi in z_dict.keys()])
-    #interp_field = interp1d_complex_function(np.real(np.array(mean_field[:, 0])), np.array(mean_field[:, 1]), z_func, kind='cubic', bounds_error=False, fill_value=0)
-    area = 2.82e-11
-    xy_integrations_per_z_slice = np.array(
-        [[zi, irregular_integration_delaunay_2d(z_dict[zi]) / np.sqrt(area)] for zi in z_dict.keys()])
-    #interp_field = interp1d_complex_function(np.real(xy_integrations_per_z_slice[:, 0]), xy_integrations_per_z_slice[:, 1], z_func,
-                                #             kind='cubic', bounds_error=False, fill_value=0)
+def inner_product_squared(points, field, z_func, func, area):
 
-    # res = regular_integration_1d(interp_field * func, z_func)
-    res = regular_integration_1d(func, z_func) / area
+    Vi, grid = interp3d(points, field, resolution=35)
+    f_dict = create_func_dict(grid, Vi)
+
+    # plotting the grid:
+    #fig = plt.figure()
+    #ax = fig.add_subplot(projection='3d')
+    #ax.scatter(grid[:,0], grid[:,1], grid[:,2])
+    #plt.show()
+
+    z = grid[:, 2]
+    squared_xy_terms = []
+    for x,y in tqdm(zip(grid[:,0],grid[:,1]), total=len(z)):
+        xy_func = np.array([f_dict[x][y][zi] for zi in z])
+        u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        interp_field = u_z_interp(z_func)
+        squared_xy_terms.append((x, y, abs(regular_integration_1d(func * interp_field, z_func)) ** 2))
+    res = irregular_integration_delaunay_2d(squared_xy_terms) / area
     return res
 
 def inner_prodcut_with_field2(p, u, z_func, func, A):
@@ -202,18 +242,12 @@ def create_cylinder_grid(x,y,z, resolution=None):
 
 
 
-def interp3d_test(points, V, resolution=None):
+def interp3d(points, V, resolution=None):
     x = points[:, 0]
     y = points[:, 1]
     z = points[:, 2]
     grid = create_cylinder_grid(x, y, z, resolution)
-    #my_interpolating_function = rgi((x, y, z), V)
-    #rbf_interp = interpolate.Rbf(x,y,z,V, function='linear')
-    xi = grid[:, 0]
-    yi = grid[:, 1]
-    zi = grid[:, 2]
 
-    #Vi = my_interpolating_function(array([xi, yi, zi]).T)
     print("Interpolating...")
     Vi = griddata(points, V, grid, method='linear', fill_value=0, rescale=True)
     print("Done interpolating!")
@@ -247,3 +281,16 @@ def maximise_duplicates(points, func):
     new_func = np.array(new_func)
 
     return maximise_duplicates(new_points, new_func)
+
+def generic_scatter_3d(points, func_array=None, as_log=True):
+    func_name = 'Func'
+    d = {'X': points[:,0], 'Y': points[:,1], 'Z': points[:,2], func_name: func_array}
+    df = pd.DataFrame.from_dict(d)
+    if not as_log:
+        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color=func_name)
+        fig.show()
+    else:
+        log_field_name = 'log'
+        df[log_field_name] = df[func_name].apply(np.log10)
+        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color=log_field_name)
+        fig.show()

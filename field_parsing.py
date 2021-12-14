@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from utilities import *
 from wavefunc import load_wavefunction, normalize_wv
 import csv
+import os
 from tqdm import tqdm
 
 class ElectricMode(object):
@@ -45,14 +46,13 @@ class ElectricMode(object):
         self.e_field = self.e_field / (self.compute_norm()) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
 
-    def use_disperssion(self):
+    def use_disperssion(self, energy):
         # calcualting the effective epsilon and derivative of epsilon:
         mode_energy = cn.physical_constants['Planck constant in eV/Hz'][0] * self.frequency
         bulk_dispersion = self._eps['bulk_eps']
         active_dispersion = self._eps['total_eps']
         energy = self._eps['omega']
         omega = energy / cn.physical_constants['reduced Planck constant in eV s'][0]
-
         bulk_interp = interpolate.interp1d(energy, bulk_dispersion)
         active_interp = interpolate.interp1d(energy, active_dispersion)
         bulk_eps_r = bulk_interp(mode_energy)
@@ -71,8 +71,8 @@ class ElectricMode(object):
         self.d_bulk_eps_r = d_bulk_eps_r
         self.d_active_eps_r = d_active_eps_r
 
-    def normalize(self):
-        self.use_disperssion()
+    def normalize(self , energy):
+        self.use_disperssion(energy)
         active_eps_r = self.active_eps_r
         bulk_eps_r = self.bulk_eps_r
         d_active_eps_r = self.d_active_eps_r
@@ -81,17 +81,6 @@ class ElectricMode(object):
         z = self.points[:, 2]
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
         d = dipole_locations(z_linspace)
-        effective_eps = 0
-        effective_derivative_eps = 0
-        for zi in range(len(z_linspace)):
-            if d[zi]:
-                effective_eps += active_eps_r
-                effective_derivative_eps += d_active_eps_r
-            else:
-                effective_eps += bulk_eps_r
-                effective_derivative_eps += d_bulk_eps_r
-        effective_eps /= len(z_linspace)
-        effective_derivative_eps /= len(z_linspace)
         normalization_results = 1 / (np.sqrt(np.real(effective_eps)) * effective_derivative_eps)
         self.e_field = self.e_field * (normalization_results / self.compute_norm()) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
@@ -281,8 +270,8 @@ class ElectricMode(object):
         interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:,0]), np.array(xy_integrations_per_z_slice[:,1]), kind='cubic')
         interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
         """
-        interpolated_z_gamma = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_func)
-        gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
+        avg_z_gamma = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_func)
+        gamma_effective = regular_integration_1d(dipole_density * avg_z_gamma, z_linspace)
 
         return gamma_effective
 
@@ -423,37 +412,36 @@ class ElectricMode(object):
         return averaged_z_field, z_linspace
 
 
-    def approximations_comparison(self, wv_path, f=None):
+    def approximations_comparison(self, wv_path, file_name=None, f=None, save_log=False):
+        if save_log:
+            log_file = open(r"C:\Shaked\Technion\QCL_Project\logs\2\{}.txt".format(file_name), 'w')
+        # control flags
         PLOT_Z_RATE = False
         TOTAL_Z_RATE = True
-        SANITY = True
+        SANITY = False
         PLOT_DIPOLE = False
+        RUN_PERIODS = True
 
+        # setting parameters
         init_states = [2]  # states 0, 8
         FINAL_STATE = 0  # state 7
         f_m = self.frequency
         Q = self.Q
-        eps_r = self.d_active_eps_r
+
         k = 2 * np.pi * f_m * np.sqrt(self.active_eps_r) / cn.c
         e = cn.e
         PERIODS = range(12)
         PER_LEN = 30.68e-9
 
-
+        # loading device parameters
         z = self.points[:, 2]
-        self.normalize()
-        u_z = self.e_field[:, 2]
+
         wavetot, z_wv, levelstot = load_wavefunction(wv_path)
         z_wv = z_wv * 1e-9
-
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
-        averaged_u_z, _ = self.average_field()
 
         dipole_z_density = generate_dipole_along_z(dipole_locations(z_linspace), z_linspace)
-        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
         d_interp = interpolate.interp1d(z_linspace, dipole_z_density, kind='linear',bounds_error=False, fill_value=0)
-
-
 
         #for test purposes:
         if f == None:
@@ -464,11 +452,20 @@ class ElectricMode(object):
             psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
             energy_i = levelstot[INIT_STATE]
             energy_f = levelstot[FINAL_STATE]
-            f_ij = abs(energy_i - energy_f) * cn.e / cn.h
+            delta_energy = abs(energy_i - energy_f)
+            self.use_disperssion(delta_energy)
+            eps_r = np.real(self.active_eps_r)
+            self.normalize(delta_energy)
+            u_z = self.e_field[:, 2]
+            f_ij = delta_energy * cn.e / cn.h
             print("f_ij = {}THz".format(f_ij / 1e12))
             print("Delta E = {}eV".format(abs(energy_i - energy_f)))
             d = e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
             print("d = {}".format(d / e * 1e9))
+            if save_log:
+                log_file.write("f_ij = {}THz\n".format(f_ij / 1e12))
+                log_file.write("Delta E = {}eV\n".format(abs(energy_i - energy_f)))
+                log_file.write("d = {}\n".format(d / e * 1e9))
             only_momentum_product = regular_integration_1d(np.conj(psi_f) * np.gradient(psi_i, z_wv), z_wv)
             with_exponent_product = regular_integration_1d(np.conj(psi_f) * np.exp(1j * k * z_wv) * np.gradient(psi_i, z_wv), z_wv)
             #complete_non_approx_prod = inner_prodcut_with_field(z, u_z, z_wv, np.conj(psi_f) * np.gradient(psi_i, z_wv))
@@ -490,38 +487,50 @@ class ElectricMode(object):
                 plt.legend(['Ed', 'Ap', 'Ape^(ikz)'])
                 plt.show()
             if TOTAL_Z_RATE:
-                electric_dipole_result = self.calculate_effective_rate(z, np.ones(np.shape(u_z)), f, Gamma_m(u_z, d, Q, f_ij, f_m, eps_r))
-                non_dipole_result = self.calculate_effective_rate(z, np.ones(np.shape(u_z)), f, non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m, eps_r))
-                spont_results = self.calculate_effective_rate(z, u_z, f, np.ones(np.shape(u_z)) * spontaneous_emission(d, f_ij))
-
-                self.plot_gamma(z, Gamma_m(u_z, d, Q, f_ij, f_m, eps_r))
-                self.plot_gamma(z, non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m, eps_r))
-                #self.plot_gamma(z, np.ones(np.shape(u_z)) * spontaneous_emission(d, f_ij))
-                plt.legend(['E dot d', 'A dot p'])
-                #plt.show()
+                electric_dipole_result = self.calculate_effective_rate(z, u_z, f, Gamma_m(u_z, d, Q, f_ij, f_m, eps_r))
+                original_potential_result = self.calculate_effective_rate(z, u_z, f, non_dipole_Gamma_m(u_z, only_momentum_product, Q, f_ij, f_m, eps_r))
 
                 #with_exponent_result = self.calculate_effective_rate(z, u_z, f, non_dipole_Gamma_m(u_z, with_exponent_product, Q, fi, f_m))
                 #electric_dipole_result = regular_integration_1d(Gamma_m(uz_interp * dipole_density,d, Q, f_ij, f_m), z_linspace)
                 #non_dipole_result = regular_integration_1d(non_dipole_Gamma_m(uz_interp * dipole_density, only_momentum_product, Q, f_ij, f_m), z_linspace)
+                OFFSET = 8.73e-9
 
-                p = self.points
-                complete_non_approx_result = sum([inner_product_field_gamma(inner_prodcut_with_field(p, np.ones(np.shape(u_z)), z_wv + per * PER_LEN, np.conj(psi_f) * np.gradient(psi_i, z_wv)), Q, f_ij, f_m, eps_r) for per in PERIODS])
-                complete_exponent_result = sum([inner_product_field_gamma(inner_prodcut_with_field(p, np.ones(np.shape(u_z)) * np.exp(1j * k * z), z_wv + per * PER_LEN, np.conj(psi_f) * np.gradient(psi_i, z_wv)), Q, f_ij, f_m, eps_r) for per in PERIODS])
+                if RUN_PERIODS:
+                    p = self.points
+                    periods_list = []
+                    for per in PERIODS:
+                        psi_func = np.conj(psi_f) * np.gradient(psi_i, z_wv) * (np.heaviside(z_wv - OFFSET,1) - np.heaviside(z_wv - OFFSET - 3e-9,1))
+                        product = inner_product_squared(p, u_z, z_wv + per * PER_LEN, psi_func, self.disk_area)
+                        ipfg = inner_product_field_gamma(product, Q, f_ij, f_m, eps_r)
+                        periods_list.append(ipfg)
+                        print(per, ipfg)
+                        if save_log:
+                            log_file.write('period: ' + str(per) + '   ipfg: ' + str(ipfg) + '   ipfg [sec]: ' + str(1/ipfg) + '\n')
+                    non_approximated_rate = sum(periods_list)
 
-                print("E dot d = {}".format(1/electric_dipole_result))
-                print("A dot p = {}".format(1/non_dipole_result))
-                #print("A dot p dot exp= {}".format(with_exponent_result))
-                print("Inner prod A dot p = {}".format(1/complete_non_approx_result))
-                print("Inner prod A dot p dot exp= {}".format(1/complete_exponent_result))
-                print("spontaneous rate = {}".format(1/spont_results))
+                    print("Non approximated = {}  --->  {} [sec],       [{}]".format(non_approximated_rate, 1/non_approximated_rate, (non_approximated_rate / electric_dipole_result - 1) * 100))
+                    if save_log:
+                        log_file.write("Non approximated = {}  --->  {} [sec],       [{}]\n".format(non_approximated_rate, 1/non_approximated_rate, (non_approximated_rate / electric_dipole_result - 1) * 100))
+
+                print("E dot d = {}  --->  {} [sec],      [{}]".format(electric_dipole_result, 1/electric_dipole_result ,  (electric_dipole_result / electric_dipole_result - 1) * 100))
+
+                print("A dot p = {}  --->  {} [sec],      [{}]".format(original_potential_result, 1/original_potential_result, (original_potential_result / electric_dipole_result - 1) * 100))
+
+                if save_log:
+                    log_file.write("E dot d = {}  --->  {} [sec],      [{}]\n".format(electric_dipole_result, 1/electric_dipole_result ,  (electric_dipole_result / electric_dipole_result - 1) * 100))
+                    log_file.write("A dot p = {}  --->  {} [sec],     [{}]\n".format(original_potential_result,
+                                                                                 1 / original_potential_result, (
+                                                                                             original_potential_result / electric_dipole_result - 1) * 100))
+                    log_file.close()
             if SANITY:
                 #sanity check:
                 print("d^2 / overlaps^2 = {}".format((d / only_momentum_product)**2))
                 w_m = 2 * np.pi * f_m
-                print("E dot d * (e^2*pi^2*hbar^2/2m^2w^2)  / A dot p = {}".format(electric_dipole_result * ((cn.e ** 2 * np.pi * cn.hbar **2) / (4 * (cn.m_e * 0.067) ** 2 * (2 * np.pi * f_ij) ** 2)) / non_dipole_result))
+                #print("E dot d * (e^2*pi^2*hbar^2/2m^2w^2)  / A dot p = {}".format(electric_dipole_result * ((cn.e ** 2 * np.pi * cn.hbar **2) / (4 * (cn.m_e * 0.067) ** 2 * (2 * np.pi * f_ij) ** 2)) / non_dipole_result))
                 mass = 0.067 * cn.m_e
-                Mt_squared = (abs(d) * 2 * mass / cn.e) ** 2 * 2 * f_ij / cn.epsilon_0
+                #Mt_squared = (abs(d) * 2 * mass / cn.e) ** 2 * 2 * f_ij / cn.epsilon_0
                 print("Transition Matrix (?): {}".format(Mt_squared * 2 / mass * 6.2414e18 * 1e3))
+
     def plot_gamma(self, z, gamma_func):
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
         interpolated_z_gamma = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_func)
@@ -529,6 +538,8 @@ class ElectricMode(object):
         plt.title("Emission rate vs z")
         plt.xlabel('z [nm]')
         plt.ylabel('Rate [us]')
+
+
 
 
 def load_modes(folder_path, mode_frequeny_THz=None):
@@ -587,12 +598,11 @@ def dipole_locations(z_linspace):
 
 def generate_dipole_density(d, z_linspace, points):
         # integrate to obtain Y(r)
-        ones_array = create_dict_by_z(points, [1] * len(points)) # normalization
-        xy_areas = [irregular_integration_delaunay_2d(ones_array[z]) for z in ones_array.keys()]
-        A = np.mean(xy_areas)
+        #ones_array = create_dict_by_z(points, [1] * len(points)) # normalization
+
         A = 1
         # the dipole normalized density isn't affected by the dipole strength
-        dipole_density = d #/ (regular_integration_1d(d, z_linspace) * A)
+        dipole_density = d / (regular_integration_1d(d, z_linspace) * A)
         return dipole_density
 
 def generate_dipole_along_z(d, z_linspace):
@@ -612,9 +622,10 @@ def spontaneous_emission(d, f):
 def Gamma_m(u, d, Q, f, f_m, eps_r):
     hbar = cn.hbar #1.0545711818e-34
     eps_0 = cn.epsilon_0 #8.85418781762039e-12
+    #eps_r = 1
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
-    res = (2 * (abs(d) ** 2) * (abs(u) ** 2) * 2 * Q * w_m * w) / ((hbar * eps_0 * eps_r * np.pi) * (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2))
+    res = ((abs(d) ** 2) * (abs(u) ** 2) * 4 * Q * w_m * w) / ((hbar * eps_0 * eps_r * np.pi) * (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2))
     return res
 
 def non_dipole_Gamma_m(u, prod, Q, f, f_m, eps_r):
@@ -622,10 +633,10 @@ def non_dipole_Gamma_m(u, prod, Q, f, f_m, eps_r):
     m = cn.m_e * 0.067
     hbar = cn.hbar
     eps_0 = cn.epsilon_0
-    eps_r = 1
+    #eps_r = 1
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
-    res = ((e / m) ** 2) * (2 * Q * hbar / (w * eps_0 * eps_r)) * (2 / np.pi) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * (abs(u) ** 2) * (abs(prod) ** 2)
+    res = ((e / m) ** 2) * (Q * hbar / (w * eps_0 * eps_r)) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * (abs(u) ** 2) * (abs(prod) ** 2)
     return res
 
 def inner_product_field_gamma(prod, Q, f, f_m, eps_r):
@@ -633,10 +644,11 @@ def inner_product_field_gamma(prod, Q, f, f_m, eps_r):
     m = cn.m_e * 0.067
     hbar = cn.hbar
     eps_0 = cn.epsilon_0
-    eps_r = 1
+    #eps_r = 1
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
-    res = ((e / m) ** 2) * (2 * Q * hbar / (w * eps_0 * eps_r)) * (2 / np.pi) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * (abs(prod) ** 2)
+    # assuming prod is already abs-squared
+    res = ((e / m) ** 2) * (Q * hbar / (w * eps_0 * eps_r)) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * prod
     return res
 
 def gamma_m(u, Q, f, f_m):
@@ -682,7 +694,7 @@ def save_effective_emissions(electric_modes, path, f_array):
         file_name = path + r"\gamma_ratios_ef_{}_r_{}_f_{}.npy".format(str(ei.ef), str(ei.radius), str(ei.freq_str))
         ei.save_mode_emission(file_name, f_array)
 
-def create_total_emission_graph(electric_modes, path, f):
+def create_total_emission_graph(electric_modes, path, f, verbose=True):
     total_emission = np.array([])
     dipole_path = path + r"\dipole_spectrum.csv"
     factors = []
@@ -700,8 +712,9 @@ def create_total_emission_graph(electric_modes, path, f):
             total_emission = np.zeros(len(emission))
         total_emission += emission
         total_purcell = calculate_purcell_factor(total_emission, dipoles, f)
-    for fact in factors:
-        print("Mode {} - Fp = {} - Relative {}".format(fact[0], fact[1], np.round(fact[1] / total_purcell * 100, 2)))
+    if verbose:
+        for fact in factors:
+            print("Mode {} - Fp = {} - Relative {}".format(fact[0], fact[1], np.round(fact[1] / total_purcell * 100, 2)))
     return total_emission
 
 
@@ -717,41 +730,65 @@ def load_dipole_spectrum(path, f):
     extrapolated_dip = extrapolated_dip_func(f)
     return extrapolated_dip
 
-def plot_emission_spectrum(electric_modes, path, f):
+def get_emission_spectrum(electric_modes, path, f, plot=True, verbose=True, ax=None):
     dipole_path = path + r"\dipole_spectrum.csv"
-    total_emission = create_total_emission_graph(electric_modes, path, f)
+    total_emission = create_total_emission_graph(electric_modes, path, f, verbose)
     dipoles = load_dipole_spectrum(dipole_path, f)
     central_freqs = np.array([Ei.frequency for Ei in electric_modes])
-    plt.figure()
-    plt.plot(f / 1e12, total_emission, f / 1e12, dipoles, 'm')
-    for cf in central_freqs:
-        plt.axvline(x=cf / 1e12, linestyle=':', linewidth=0.5, c='k')
-    plt.title('Emission Spectrum for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius) +' with $F_P^{eff}$' + '= {}'.format(calculate_purcell_factor(total_emission, dipoles, f)))
-    plt.ylabel('Spectrum [a.u]')
-    plt.xlabel('Frequnecy [THz]')
-    #plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene", "Modes frequencies"])
-    plt.legend(['Total spectral enhancement', 'Emitters taken from APL paper', 'Modes frequencies'])
-    #plt.figure()
+    Fp = calculate_purcell_factor(total_emission, dipoles, f)
 
-    #plt.title(r'Structure Emission for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius))
-    #plt.plot(f / 1e12, total_emission)
+    if plot:
+        if ax is None:
+            plt.figure()
+            plt.plot(f / 1e12, total_emission, f / 1e12, dipoles, 'm')
+            for cf in central_freqs:
+                plt.axvline(x=cf / 1e12, linestyle=':', linewidth=0.5, c='k')
 
-    #plt.xlabel('Frequency [THz]')
-    #lt.ylabel('Spectrum [a.u]')
-    #plt.legend(["Total emission with graphene", "Modes frequencies"])
-    plt.show()
+            plt.title('Emission Spectrum for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius) +' with $F_P^{eff}$' + '= {}'.format(Fp))
+            plt.ylabel('Spectrum [a.u]')
+            plt.xlabel('Frequnecy [THz]')
+            #plt.legend(["$\Gamma(\omega)/\Gamma_0(\omega)$ with graphene", "Spectrum without graphene", "Modes frequencies"])
+            plt.legend(['Total spectral enhancement', 'Emitters taken from APL paper', 'Modes frequencies'])
+            #plt.figure()
+
+            #plt.title(r'Structure Emission for Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[0].radius))
+            #plt.plot(f / 1e12, total_emission)
+
+            #plt.xlabel('Frequency [THz]')
+            #plt.ylabel('Spectrum [a.u]')
+            #plt.legend(["Total emission with graphene", "Modes frequencies"])
+            plt.show()
+        else:
+            dipoles = dipoles / max(dipoles) * 1.5 * max(total_emission) # arranging nicer plots
+            ax.plot(f / 1e12, total_emission, f / 1e12, dipoles, 'm', linewidth=0.7)
+            for cf in central_freqs:
+                ax.axvline(x=cf / 1e12, linestyle=':', linewidth=0.5, c='k')
+                ax.set_title('Ef={}eV, R={}m'.format(electric_modes[0].ef, electric_modes[
+                    0].radius) + ' with $F_P^{eff}$' + '= {}'.format(Fp), fontsize=6)
+                ax.set_ylabel('Spectrum [a.u]', fontsize=6)
+                ax.set_xlabel('Frequnecy [THz]', fontsize=6)
+                plt.sca(ax)
+                plt.yticks(fontsize=6, rotation=90)
+                plt.xticks(fontsize=6)
+                ax.legend(['Total spectral enhancement', 'Emitters taken from APL paper', 'Modes frequencies'], fontsize=4)
+
+        if verbose:
+            print('Ef={}eV    ----    rad={}um    ----    Fp={}'.format(electric_modes[0].ef, electric_modes[0].radius, Fp))
+    return Fp
 
 def calculate_purcell_factor(total_emission, dipole_emission, f):
     normalized_dipole_spect = np.array(dipole_emission / regular_integration_1d(dipole_emission, f))
     return int(np.round(regular_integration_1d(normalized_dipole_spect * total_emission, f)))
 
-def generate_purcell_heatmap():
+def generate_purcell_heatmap(data=[[4206, None, 3399], [2926, 2009, 1872], [2743, 2124, 2167]]):
     import seaborn as sns
 
     Index = ['0.15', '0.2', '0.25']
+
     Cols = ['2.2', '2.6', '3.0']
+
     #data = [[17341, None, 13968],[42250, 29139, 27090],[39525, 30757, 31335]]
-    data = [[4206, None, 3399], [2926, 2009, 1872], [2743, 2124, 2167]]
+    #data = [[4206, None, 3399], [2926, 2009, 1872], [2743, 2124, 2167]]
     df = pd.DataFrame(data, index=Index, columns=Cols)
 
     sns.heatmap(df, annot=True, cmap='YlOrRd', fmt='.0f')
@@ -765,8 +802,275 @@ def averaging_over_area(points, area, z_linspace, gamma_func, kind=None):
         kind = 'cubic'
     z_dict = create_dict_by_z(points, gamma_func)
     xy_integrations_per_z_slice = np.array(
-        [[zi, irregular_integration_delaunay_2d(z_dict[zi]) / area] for zi in z_dict.keys()])
+        [[zi, irregular_integration_delaunay_2d(z_dict[zi])] for zi in z_dict.keys()])
     interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:, 0]),
                                                      np.array(xy_integrations_per_z_slice[:, 1]), kind=kind)
     interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
-    return interpolated_z_gamma
+    return interpolated_z_gamma / area
+
+def run_emission_spectrum(device_spectrum_path, f_array=np.linspace(3e12, 4.8e12, 301), plot=False, verbose=True):
+    paths = [
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_3.0um'
+    ]
+    fp_list = []
+    fig = None
+    axs = None
+    ax = None
+    if plot:
+        fig, axs = plt.subplots(3, 3)
+
+        pass
+    for idx, pth in enumerate(paths):
+        if '0.15' in pth and '2.6' in pth:
+            print("--- Bad data folder eV=0.15 rad=2.6um")
+            fp_list.append(float("NaN"))
+            continue
+        E = load_modes(pth)
+        if plot:
+            ax = axs[int(idx / 3), idx % 3]
+            pass
+        fp_res = get_emission_spectrum(E, device_spectrum_path, f_array, plot, verbose, ax)
+        fp_list.append(fp_res)
+
+    if plot:
+        fig.tight_layout()
+        fig.show()
+
+    fp_array=np.array(fp_list).reshape([3,3])
+    fig = plt.figure()
+    generate_purcell_heatmap(fp_array)
+
+
+def run_approximation_comparison(folder_path, wv_path, save_log=False):
+    rads = ['2.2', '2.6', '3.0']
+    efs = ['0.15', '0.2', '0.25']
+    for ef in efs:
+        for rad in rads:
+            if ef == '0.25':
+                E = load_modes(
+                    folder_path + r"\Ef-" + ef + "eV_" + rad + "um")
+            else:
+                if ef =='0.15' and rad == '2.6':
+                    continue
+                E = load_modes(
+                    folder_path + r"\E_f-" + ef + "eV\Ef-" + ef +"eV_" + rad + "um")
+            for Ei in E:
+                name = "Ef_" + str(Ei.ef) + "_r_" + str(np.round(Ei.radius * 1e6,2)) + 'um_f_' + Ei.freq_str +'THz'
+                Ei.approximations_comparison(wv_path, name, save_log)
+
+def disspersion(mode_energy):
+    # calcualting the effective epsilon and derivative of epsilon:
+    eps = np.load(r"C:\Shaked\Technion\QCL_Project\Wavefunctions\structure_epsilon.npy", allow_pickle=True)[()]
+    bulk_dispersion = eps['bulk_eps']
+    active_dispersion = eps['total_eps']
+
+    energy = eps['omega']
+    omega = energy / cn.physical_constants['reduced Planck constant in eV s'][0]
+    bulk_interp = interpolate.interp1d(energy, bulk_dispersion)
+    active_interp = interpolate.interp1d(energy, active_dispersion)
+
+    bulk_eps_r = bulk_interp(mode_energy)
+    active_eps_r = active_interp(mode_energy)
+
+
+    dw = omega[1] - omega[0]
+    bulk_eps_derivative = np.gradient(omega * np.sqrt(np.real(bulk_dispersion))) / dw
+    active_eps_derivative = np.gradient(omega * np.sqrt(np.real(active_dispersion))) / dw
+
+    d_bulk_interp = interpolate.interp1d(energy, bulk_eps_derivative)
+    d_active_interp = interpolate.interp1d(energy, active_eps_derivative)
+    d_bulk_eps_r = d_bulk_interp(mode_energy)
+    d_active_eps_r = d_active_interp(mode_energy)
+    return bulk_eps_r, active_eps_r
+
+
+
+def parse_comparison_log(log_path):
+    """
+
+    """
+    log_file = open(log_path, 'r')
+    log = log_file.read()
+    log_file.close()
+    loglines = log.splitlines()
+    f_ij = float(loglines[0][loglines[0].find('=') + 2:-3]) * 1e12
+    delta_E = float(loglines[1][loglines[1].find('=') + 2:-2])
+    dipole = float(loglines[2][loglines[2].find('=') + 2:])
+    non_approximated_result = float(loglines[-3][loglines[-3].find('>') + 2 : loglines[-3].find('[')])
+    dipole_approximated_result = float(loglines[-2][loglines[-2].find('>') + 2: loglines[-2].find('[')])
+    vector_potential_result = float(loglines[-1][loglines[-1].find('>') + 2: loglines[-1].find('[')])
+    periods_non_approximated_res = [float(loglines[i][loglines[i].find('[') + 6:]) for i in range(3,15)]
+    return [f_ij, delta_E, dipole, non_approximated_result, dipole_approximated_result, vector_potential_result,periods_non_approximated_res]
+
+def show_rate_comparison(log_path):
+    fig, axs = plt.subplots(3,3)
+    rads = ['2.2', '2.6', '3.0']
+    efs = ['0.15', '0.2', '0.25']
+    plot_idx = dict()
+    for efi in efs:
+        for radi in rads:
+            if float(efi) in plot_idx.keys():
+                plot_idx[float(efi)][float(radi)] = dict()
+            else:
+                plot_idx[float(efi)] = dict()
+                plot_idx[float(efi)][float(radi)] = dict()
+
+    for filename in os.listdir(log_path):
+        edotd_list = []
+        non_approx_list = []
+        label_list = []
+        full_log_path = os.path.join(log_path, filename)
+        ef = float(filename[3:filename.find('_r_')])
+        radius_um = float(filename[filename.find('_r_') + 3:filename.find('um_')])
+        f_thz = float(filename[filename.find('_f_') + 3:filename.find('THz')])
+        parsed_log = parse_comparison_log(full_log_path)
+
+        if f_thz in plot_idx[ef][radius_um].keys():
+            #lot_idx[ef][radius_um][f_thz].append([parsed_log[4], parsed_log[3]])
+            pass
+        else:
+            plot_idx[ef][radius_um][f_thz] = [parsed_log[4], parsed_log[3]]
+        #plot_idx[ef][radius_um][f_thz].append([edotd_list, non_approx_list])
+        #edotd_list.append(parsed_log[4])
+        #non_approx_list.append(parsed_log[3])
+        #plot_idx[ef][radius_um][f_thz].append([parsed_log[4], parsed_log[3]])
+
+    ax_counter = 0
+    for efi in efs:
+        for radi in rads:
+            x_axis = np.array(range(len(plot_idx[float(efi)][float(radi)].keys())))
+            edotd_list = list()
+            non_app_list = list()
+            freqs = list()
+            for f in plot_idx[float(efi)][float(radi)].keys():
+                edotd, non_approx = plot_idx[float(efi)][float(radi)][f]
+                edotd_list.append(edotd / 1e-6)
+                non_app_list.append(non_approx / 1e-6)
+                freqs.append(f)
+            #if len(edotd_list) == 0:
+                #print(efi, radi)
+            #print('row {}'.format(int(ax_counter / 4)))
+            #print('col {}'.format(ax_counter % 3))
+            axs[int(ax_counter / 3), ax_counter % 3].set_title('{}eV {}um'.format(efi,radi),fontsize=6)
+            axs[int(ax_counter / 3), ax_counter % 3].bar(x_axis - 0.2, edotd_list, 0.4, label='Dipole Approx.')
+            axs[int(ax_counter / 3), ax_counter % 3].bar(x_axis + 0.2, non_app_list, 0.4, label='Non Approx.')
+            plt.sca(axs[int(ax_counter / 3), ax_counter % 3])
+            plt.xticks(x_axis, freqs, fontsize=6)
+            plt.yticks(fontsize=6)
+
+            axs[int(ax_counter / 3), ax_counter % 3].set_xlabel('Mode [THz]', fontsize=6)
+            axs[int(ax_counter / 3), ax_counter % 3].set_ylabel('Rate [$\mu$sec]', fontsize=6)
+            #axs[int(ax_counter / 3), ax_counter % 3].legend()
+            ax_counter += 1
+
+    plt.legend(loc='lower right', bbox_to_anchor=(1,-0.0), ncol=1, bbox_transform=fig.transFigure, fontsize=6)
+    fig.tight_layout()
+    plt.show()
+
+def show_rate_for_QW(log_path):
+    fig, axs = plt.subplots(3, 3)
+    rads = ['2.2', '2.6', '3.0']
+    efs = ['0.15', '0.2', '0.25']
+    plot_idx = dict()
+    for efi in efs:
+        for radi in rads:
+            if float(efi) in plot_idx.keys():
+                plot_idx[float(efi)][float(radi)] = dict()
+            else:
+                plot_idx[float(efi)] = dict()
+                plot_idx[float(efi)][float(radi)] = dict()
+
+    for filename in os.listdir(log_path):
+        edotd_list = []
+        non_approx_list = []
+        label_list = []
+        full_log_path = os.path.join(log_path, filename)
+        ef = float(filename[3:filename.find('_r_')])
+        radius_um = float(filename[filename.find('_r_') + 3:filename.find('um_')])
+        f_thz = float(filename[filename.find('_f_') + 3:filename.find('THz')])
+        parsed_log = parse_comparison_log(full_log_path)
+
+        if f_thz in plot_idx[ef][radius_um].keys():
+            # lot_idx[ef][radius_um][f_thz].append([parsed_log[4], parsed_log[3]])
+            pass
+        else:
+            plot_idx[ef][radius_um][f_thz] = parsed_log[-1]
+        # plot_idx[ef][radius_um][f_thz].append([edotd_list, non_approx_list])
+        # edotd_list.append(parsed_log[4])
+        # non_approx_list.append(parsed_log[3])
+        # plot_idx[ef][radius_um][f_thz].append([parsed_log[4], parsed_log[3]])
+
+    ax_counter = 0
+    for efi in efs:
+        for radi in rads:
+            x_axis = np.array(range(12))
+            qw_ipfgs = list()
+            freqs = list()
+            for f in plot_idx[float(efi)][float(radi)].keys():
+                qw_rates = np.array(plot_idx[float(efi)][float(radi)][f]) / 1e-6
+                axs[int(ax_counter / 3), ax_counter % 3].plot(x_axis+1, qw_rates, '+', label='{}THz'.format(f))
+            plt.sca(axs[int(ax_counter / 3), ax_counter % 3])
+            plt.yticks(fontsize=6)
+            plt.xticks(x_axis+1,fontsize=6)
+            axs[int(ax_counter / 3), ax_counter % 3].set_xlabel('QW [#]', fontsize=6)
+            axs[int(ax_counter / 3), ax_counter % 3].set_ylabel('Rate [usec]', fontsize=6)
+            axs[int(ax_counter / 3), ax_counter % 3].legend(fontsize=4)
+            # axs[int(ax_counter / 3), ax_counter % 3].legend()
+            ax_counter += 1
+
+    #plt.legend(loc='lower right', bbox_to_anchor=(1, -0.0), ncol=1, bbox_transform=fig.transFigure, fontsize=6)
+    fig.tight_layout()
+    plt.show()
+
+
+
+    for filename in os.listdir(log_path):
+        edotd_list = []
+        non_approx_list = []
+        label_list = []
+        full_log_path = os.path.join(log_path, filename)
+        parsed_log = parse_comparison_log(full_log_path)
+
+
+
+
+def fix_eps_r(folder_path, dest_path):
+    for filename in os.listdir(folder_path):
+        log_path = os.path.join(folder_path, filename)
+        f = open(log_path, 'r')
+        log = f.read()
+        f.close()
+        parsed_log = parse_comparison_log(log_path)
+        delta_E = parsed_log[1]
+        electric_dipole_result = 1 / parsed_log[4]
+        eps_r = np.real(disspersion(delta_E)[1])
+        flines = log.splitlines()
+        new_flines = list(flines)
+        rates = []
+        for i in range(3,15):
+            lfln = flines[i]
+            rate = float(lfln[lfln.find('ipfg: ') + 6: lfln.find('  ipfg [')])
+            new_rate = rate / eps_r
+            rates.append(new_rate)
+            nlfln = new_flines[i]
+            new_flines[i] = nlfln[:nlfln.find('ipfg: ') + 6] + str(new_rate) + nlfln[nlfln.find('  ipfg [') : nlfln.find(']:') + 3] + str(1 / new_rate)
+        nlfln15 = new_flines[15]
+        new_total_rate = sum(rates)
+        percentage = (new_total_rate / electric_dipole_result - 1) * 100
+        new_flines[15] = nlfln15[:nlfln15.find('=') + 2] + str(new_total_rate) + nlfln15[nlfln15.find(' --') : nlfln15.find('>') + 3] + str(1 / new_total_rate) + nlfln15[nlfln15.find(' [s') : nlfln15.find('   [') + 4] + str(percentage) + ']'
+        new_log = '\n'.join([new_flines[i] for i in range(len(new_flines))])
+        new_log_path = os.path.join(dest_path, filename)
+        f = open(new_log_path, 'w')
+        f.write(new_log + '\n')
+        f.close()
+
+
+
