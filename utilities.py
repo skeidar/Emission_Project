@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.spatial as ssp
 from scipy import interpolate
-from scipy.interpolate import RegularGridInterpolator as rgi
+from scipy import constants as cn
 from scipy.interpolate import griddata
 from matplotlib import pyplot as plt
 from tqdm import tqdm
@@ -294,3 +294,11 @@ def generic_scatter_3d(points, func_array=None, as_log=True):
         df[log_field_name] = df[func_name].apply(np.log10)
         fig = px.scatter_3d(df, x='X', y='Y', z='Z', color=log_field_name)
         fig.show()
+
+def freq2energy(frequnecy):
+    # energy in eV, frequency in Hz
+    return frequnecy * cn.h / cn.e
+
+def energy2freq(energy):
+    # energy in eV, frequency in Hz
+    return cn.e * energy / cn.h

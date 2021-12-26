@@ -42,16 +42,28 @@ class Wavefunction(object):
         plt.legend(['Structure bands', "Upper", "Lower"])
         plt.show()
 
-    def plot_dat(self):
+    def plot_dat(self, simplify=False):
         Ntot = 21
         Nper = 7
         z = self.dat[:,0]
         energy_band = self.dat[:, 1]
         wavefuncs = np.array([self.dat[:,i] for i in range(2,Ntot + 2)]).T
 
-        plt.plot(z, energy_band)
-        for i in range(Nper * 3):
-            plt.plot(z, wavefuncs[:,i])
+        ULS_idx = 2
+        injector_idx = 1
+        LLS_idx = 0
+        if simplify:
+            plt.figure()
+            plt.plot(z, energy_band)
+            plt.plot(z, wavefuncs[:, ULS_idx], label='ULS')
+            plt.plot(z, wavefuncs[:, LLS_idx], label='LLS')
+            plt.plot(z, wavefuncs[:, injector_idx], label='Injector')
+            plt.legend()
+        else:
+            plt.figure()
+            plt.plot(z, energy_band)
+            for i in range(Nper * 3):
+                plt.plot(z, wavefuncs[:,i])
         plt.title("{} Wavefunctions".format(self.name))
         plt.xlabel('z [nm]')
         #plt.ylabel('E [meV]')
@@ -121,7 +133,7 @@ def load_wavefunction(wv_path):
 
     return wavetot2, z, levelstot
 
-def testing_shifts():
+def dipole_and_shifts_500_100():
 
     martin_path = r"C:\Shaked\Technion\QCL_Project\Wavefunctions\50.0_10.0_0.0\50.0_10.0_0.0\bandplot.dat"
     wv_martin = np.loadtxt(martin_path)
@@ -210,6 +222,94 @@ def testing_shifts():
     plt.plot(z,wavetot[:,:])
     plt.show()
 
+def testing_shifts_APL():
+    martin_path = r"C:\Shaked\Technion\QCL_Project\Wavefunctions\50.0_10.0_0.0\50.0_10.0_0.0\bandplot.dat"
+    wv_martin = np.loadtxt(martin_path)
+
+    wavec = np.loadtxt(r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\APL_2019\APL_2019\bandplot.dat",skiprows=4)
+    z = wavec[:, 0]
+    wavefuncs = wavec[:, 1:]
+    N_WV = len(wavefuncs[0, :])
+    Zper = 30.68
+    Nper = int(Zper / (z[1] - z[0]))
+    L_wv = len(wavefuncs[:, 0])
+    print(Nper, N_WV, L_wv)
+    """
+    left_shift_wavefuncs = np.zeros(np.shape(wavefuncs))
+    left_shift_wavefuncs[:L_wv-Nper,:] = wavefuncs[Nper:,:]
+    left_shift_wavefuncs[L_wv-3*Nper:,:] = 0 #wavefuncs[-1,:]
+
+    right_shift_wavefuncs = np.zeros(np.shape(wavefuncs))
+    right_shift_wavefuncs[Nper:,:] = wavefuncs[:L_wv-Nper,:]
+    right_shift_wavefuncs[:Nper,:] = wavefuncs[0,:]
+    right_shift_wavefuncs[L_wv-2*Nper:,:] = 0
+
+    wavefuncs[L_wv-2*Nper:,:] = 0
+    """
+    plt.plot(wavefuncs)
+    plt.show()
+    left_shift_wavefuncs = np.zeros(np.shape(wavefuncs))
+    left_shift_wavefuncs[:L_wv - Nper, :] = wavefuncs[Nper:, :]
+    left_shift_wavefuncs[L_wv - 1 * Nper:, :] = 0  # wavefuncs[-1,:]
+
+    right_shift_wavefuncs = np.zeros(np.shape(wavefuncs))
+    right_shift_wavefuncs[Nper:, :] = wavefuncs[:L_wv - Nper, :]
+    right_shift_wavefuncs[:Nper, :] = 0  # wavefuncs[0,:]
+
+    Npp = Nper
+    Nnu = N_WV
+    Nper = 5
+    wavetot2 = np.zeros((len(z), 3 * Nnu))
+    for iper in range(-1, 2):
+        istart = max(0, -iper * Npp)
+        # iend = min((Nper-iper)*Npp,Nper*Npp)
+        # iend = min((2 * Nper + 1 - iper) * Npp, (Nper + 1) * Npp)
+        iend = min((Nper + 1 - iper) * Npp, (Nper + 1) * Npp)
+        istart_p = max(0, iper * Npp)
+        iend_p = istart_p + (iend - istart)
+        wcper = np.zeros(np.shape(wavefuncs))
+        print(istart, iend, istart_p, iend_p)
+        for inu in range(Nnu):
+            wcper[istart_p:iend_p, inu] = wavefuncs[istart:iend, inu]
+        wavetot2[:, (iper + 1) * Nnu:(iper + 2) * Nnu] = wcper
+
+    zij = np.zeros((3 * N_WV, 3 * N_WV))
+
+    wavetot = np.zeros((np.shape(wavefuncs)[0], 3 * np.shape(wavefuncs)[1]))
+    wavetot[:, :N_WV] = left_shift_wavefuncs
+    wavetot[:, N_WV:2 * N_WV] = wavefuncs
+    wavetot[:, 2 * N_WV:] = right_shift_wavefuncs
+
+    """
+    plt.plot(z, wavetot2[:, 0:6], 'b', z, wavetot[:,:N_WV], '--r')
+    plt.show()
+    plt.plot(z, wavetot2[:, 6:12], 'b',z, wavetot[:,N_WV:2* N_WV], '--r')
+    plt.show()
+    plt.plot(z, wavetot2[:, 12:18], 'b', z, wavetot[:, 2 *N_WV:], '--r')
+    plt.show()
+    """
+    for i in range(3 * N_WV):
+        for j in range(3 * N_WV):
+            zij[i][j] = None
+            if i is not j:
+                wv_i = wavetot[:, i]  # units of 1/sqrt(nm)
+                wv_j = wavetot[:, j]  # units of 1/sqrt(nm)
+                zij[i][j] = regular_integration_1d(wv_i * wv_j * z, z)
+    Index = [f'w={i % 6}, p={int(i / 6) - 1}' for i in range(3 * N_WV)]
+    Cols = [f'w={i % 6}, p={int(i / 6) - 1}' for i in range(3 * N_WV)]
+    df = pd.DataFrame(zij, index=Index, columns=Cols)
+    plt.figure()
+    sns.set(font_scale=0.6)
+    sns.heatmap(df, annot=True, annot_kws={"fontsize": 5}, fmt='.3f')
+    plt.title("Zij [nm]")
+    plt.ylabel("Wavefunc, Period")
+    plt.xlabel("Wavefunc, Period")
+    plt.show()
+    plt.figure()
+
+    plt.plot(z, wavetot[:, :])
+    plt.show()
+
 
 if __name__ == "__main__":
     wv = Wavefunction("APL_2019")
@@ -217,18 +317,25 @@ if __name__ == "__main__":
     wavetot, z_wv, levelstot = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
     ULS_index = 2
+    injector_index = 1
     LLS_index = 0
     #testing_shifts()
-    nwv_U = normalize_wv(wavetot[:,ULS_index], z_wv)
-    nwv_L = normalize_wv(wavetot[:,LLS_index], z_wv)
-    plt.plot(z_wv, 0.3 * wavetot[:,ULS_index] ** 2 + levelstot[ULS_index])
-    plt.plot(z_wv, 0.3 * wavetot[:,LLS_index] ** 2 + levelstot[LLS_index])
-    print(regular_integration_1d(nwv_U * nwv_L * z_wv, z_wv))
-    plt.show()
-    plt.plot(z_wv, wavetot[:, ULS_index])
-    plt.plot(z_wv, wavetot[:, LLS_index])
-    plt.legend(['ULS', 'LLS'])
-    plt.show()
-    wv.plot_mat()
-    wv.plot_dat()
+    #nwv_U = normalize_wv(wavetot[:,ULS_index], z_wv)
+    #nwv_L = normalize_wv(wavetot[:,LLS_index], z_wv)
+    #plt.plot(z_wv, 0.3 * wavetot[:, ULS_index] ** 2 + levelstot[ULS_index])
+    #plt.plot(z_wv, 0.3 * wavetot[:, LLS_index] ** 2 + levelstot[LLS_index])
+    #plt.plot(z_wv, 0.3 * wavetot[:, injector_index] ** 2 + levelstot[injector_index])
+
+    #print(regular_integration_1d(nwv_U * nwv_L * z_wv, z_wv))
+    #print(regular_integration_1d(wavetot[:,ULS_index] * wavetot[:,LLS_index] * z_wv, z_wv))
+    #plt.show()
+    #plt.plot(z_wv, wavetot[:, ULS_index])
+    #plt.plot(z_wv, wavetot[:, LLS_index])
+    #plt.plot(z_wv, wavetot[:, injector_index])
+    #plt.legend(['ULS', 'LLS', 'Injector'])
+    #plt.show()
+    #wv.plot_mat()
+    #wv.plot_dat(simplify=False)
+
+    testing_shifts_APL()
 
