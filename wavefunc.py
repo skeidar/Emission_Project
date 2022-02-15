@@ -97,7 +97,13 @@ def normalize_wv(wavefunction, z):
 
 def load_wavefunction(wv_path):
 
-    wavec = np.loadtxt(wv_path + "\wsfuncrediag.dat", skiprows=4)
+    wavec = np.loadtxt(wv_path + r"\wsfuncrediag.dat", skiprows=4)
+    bandplot_dat = np.loadtxt(wv_path + r"\bandplot.dat", skiprows=4)
+    energy_band = bandplot_dat[:,1]
+    band_z = bandplot_dat[:,0]
+    bandplot = np.zeros([len(energy_band), 2])
+    bandplot[:, 0] = band_z
+    bandplot[:, 1] = energy_band
     z = wavec[:, 0]
     wavefuncs = wavec[:, 1:]
     N_WV = len(wavefuncs[0, :])
@@ -113,7 +119,7 @@ def load_wavefunction(wv_path):
     #Nper = 6
     Nper = int((L_wv / Npp - 1))
 
-    wsdata = np.loadtxt(wv_path + "\wslevelsRediag.dat", skiprows=4, max_rows=Nnu + 2)
+    wsdata = np.loadtxt(wv_path + r"\wslevelsRediag.dat", skiprows=4, max_rows=Nnu + 2)
     levels = wsdata[:, 2]
 
     wavetot2 = np.zeros((len(z), 3 * Nnu))
@@ -131,7 +137,7 @@ def load_wavefunction(wv_path):
             levelstot[(iper + 1) * Nnu + inu] = levels[inu] - iper * eFd
         wavetot2[:, (iper + 1) * Nnu:(iper + 2) * Nnu] = wcper
 
-    return wavetot2, z, levelstot
+    return wavetot2, z, levelstot, bandplot
 
 def dipole_and_shifts_500_100():
 
@@ -269,6 +275,50 @@ def testing_shifts_APL():
     plt.show()
     plt.figure()
     print(regular_integration_1d(full_range_wvtot[:, 7] * full_range_wvtot[:, 8] * z_wv, z_wv))
+
+def plot_wavefunctions_along_z(wv_path, zdush):
+    wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
+    z_linspace = np.linspace(zdush.min(), round_micro_meter(zdush.max(), 4), 10000)
+    print(z_linspace[0], z_linspace[-1])
+    z_wv = z_wv * 1e-9
+    bandplot[:,0] = bandplot[:,0] * 1e-9
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+    nQW = 12
+    perLen = 30.68e-9
+    psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+    psi_uls = wavetot[:, init_states[0]] * np.sqrt(1e9)
+    psi_inj = wavetot[:, init_states[1]] * np.sqrt(1e9)
+    psi_i = [psi_uls, psi_inj]
+    total_psi_uls = np.zeros(np.shape(z_linspace))
+    total_psi_inj = np.zeros(np.shape(z_linspace))
+    total_psi_f = np.zeros(np.shape(z_linspace))
+    band_energy_diff = (levelstot[0] - levelstot[7]) * 1000
+    f_energy_diff = (levelstot[0] - levelstot[7]) * 1000
+    print(f_energy_diff)
+    i_energy_diff = [(levelstot[2] - levelstot[9]) * 1000 , levelstot[1] - levelstot[8]]
+    print(i_energy_diff)
+    for i in range(nQW):
+        OFFSET = 0e-9
+        interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2, kind='cubic',
+                                                 fill_value=0, bounds_error=False)
+        interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[0]) ** 2, kind='cubic',
+                                                 fill_value=0, bounds_error=False)
+        interp_bandplot_func = interpolate.interp1d(bandplot[:,0] + perLen * i + OFFSET, bandplot[:,1], kind='linear',
+                                                 fill_value=0, bounds_error=False)
+        periods_args = np.logical_and(z_linspace >= (z_wv + perLen * i + OFFSET).min(), z_linspace <= (z_wv + perLen * i + OFFSET).max())
+        interp_psi_f = interp_psi_f_func(z_linspace) / 2e6 - f_energy_diff * i + levelstot[0] * 1000
+        #bold_interp_psi_f = interp_psi_f_func(z_linspace[]) / np.sqrt(1e9) - f_energy_diff * i + levelstot[0] * 10
+        interp_psi_i = interp_psi_i_func(z_linspace) / 2e6 - i_energy_diff[0] * i + levelstot[2] * 1000
+        interp_bandplot = interp_bandplot_func(z_linspace) - band_energy_diff * i #+ levelstot[0] * 10
+        plt.plot(z_linspace, interp_psi_f, color='#365ba6', linestyle='--', linewidth=0.5)
+        plt.plot(z_linspace[periods_args], interp_psi_f[periods_args], color='#365ba6', linewidth=0.7)
+        plt.plot(z_linspace, interp_psi_i, color='#a63636', linestyle='--', linewidth=0.5)
+        plt.plot(z_linspace[periods_args], interp_psi_i[periods_args], color='#a63636', linewidth=0.7)
+        plt.plot(z_linspace[periods_args], interp_bandplot[periods_args], 'k', linewidth=0.5)
+    plt.show()
+
+
 
 if __name__ == "__main__":
     wv = Wavefunction("APL_2019")

@@ -401,7 +401,7 @@ class ElectricMode(object):
         # loading device parameters
         z = self.points[:, 2]
 
-        wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+        wavetot, z_wv, levelstot, _ = load_wavefunction(wv_path)
         z_wv = z_wv * 1e-9
         z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
 
@@ -1230,7 +1230,7 @@ def get_total_check_dipole_rate(e_path, wv_path, f_array):
     z = points[:, 2] # same for all
     z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
 
-    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    wavetot, z_wv, levelstot, _ = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
     init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
@@ -1301,8 +1301,9 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
     ndip = 0
     perLen = 30.68e-9
     # Code repeatition, wth...
-    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
+    bandplot[:, 0] = bandplot[:, 0] * 1e-9
     init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
 
@@ -1421,6 +1422,17 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                 plt.xticks(np.linspace(used_f_array.min() / 1e12, used_f_array.max() / 1e12, 7), fontsize=6)
 
     if zgammaplt:
+        # interpolating the wavefunctions - HARDCODED
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        psi_uls = wavetot[:, init_states[0]] * np.sqrt(1e9)
+        psi_inj = wavetot[:, init_states[1]] * np.sqrt(1e9)
+        psi_i = [psi_uls, psi_inj]
+        i_colour = ['#a63636' ,'#a68436']
+        MILI_TO_EV = 1000
+        BEAUTY_FACTOR = 2e6
+        band_energy_diff = (levelstot[0] - levelstot[7]) * MILI_TO_EV
+
+
         if sumplt:
             plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,
                      linewidth=0.5)
@@ -1432,11 +1444,44 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
         else:
             for dip in range(ndip):
                 plt.figure(dip)
-                plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
-                plt.legend(fontsize=6)
+                plt.legend(fontsize=6, loc=1)
                 plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
                 plt.xlabel('z [nm]')
-            plt.tight_layout()
+
+                ax1 = plt.gca()
+                ax2 = ax1.twinx()
+                ax2.set_ylabel('Wavefunctions [a.u.]', color='#365ba6')
+                ax2.spines['right'].set_color('#365ba6')
+                ax2.tick_params(axis='y', colors='#365ba6')
+                # ax2.set_yticks([0,1])
+                for i in range(nQW):
+                    OFFSET = 0e-9
+                    interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2, kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[dip]) ** 2,
+                                                             kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + perLen * i + OFFSET, bandplot[:, 1],
+                                                                kind='linear',
+                                                                fill_value=0, bounds_error=False)
+                    periods_args = np.logical_and(z_linspace >= (z_wv + perLen * i + OFFSET).min(),
+                                                  z_linspace <= (z_wv + perLen * i + OFFSET).max())
+                    interp_psi_f = interp_psi_f_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[FINAL_STATE] * MILI_TO_EV
+                    interp_psi_i = interp_psi_i_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[init_states[dip]] * MILI_TO_EV
+                    interp_bandplot = interp_bandplot_func(z_linspace) - band_energy_diff * i  # + levelstot[0] * 10
+                    ax2.plot(z_linspace * 1e9, interp_psi_f, color='#365ba6', linestyle='--',  linewidth=0.3, zorder=1)
+                    ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_bandplot[periods_args], color='black',
+                             linestyle='--', linewidth=0.3, zorder=1)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='#365ba6', linestyle='--', linewidth=0.5, zorder=1)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color=i_colour[dip], linestyle='--', linewidth=0.5, zorder=1)
+
+                #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
+                legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc=3)
+                for line in legend2.get_lines():
+                    line.set_linewidth(1.0)
+                ax2.add_artist(legend2)
+                plt.tight_layout()
             plt.show()
     if qwgammaplt:
         # interpolating the wavefunctions - HARDCODED
@@ -1555,7 +1600,7 @@ def save_updated_dipole_rate(e_path, wv_path, f_array, files_path):
     z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
     dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, points)
 
-    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    wavetot, z_wv, levelstot, _ = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
     init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
