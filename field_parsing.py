@@ -302,51 +302,25 @@ class ElectricMode(object):
 
         return gamma_effective
 
-    def calculate_effective_rate2(self, z, u_z, f, gamma_func=None):
-        # step 1 - 2d integration over xy to obtain gamma(z).
-        #        step 1a - calculating the mean value at a certain z
-        #        step 1b - integration for every z using triangulation
-        # step 2 - interpolation over z
-        # step 3 - 1d integration over gamma(z)*Y(z)dz
-        energy = f * cn.h / cn.e
+    def calculate_rate_over_z(self, z_linspace, u_z, f_ij, d):
+        energy = freq2energy(f_ij)
         eps_r = np.real(disspersion(energy)[1])
         if eps_r == 1:
             print("Warning : eps_r = 1  [might be unnormalized]")
-        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(),4), 10000)
-        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
-        if gamma_func is None:
-            gamma_func = gamma_m(u_z,  self.Q, f, self.frequency, eps_r)
-        z_dict = create_dict_by_z(self.points, gamma_func)
+        Q = self.Q
+        f_k = self.frequency
+        gamma_rate = Gamma_k(u_z, d, Q, f_ij, f_k)
+        #non_interp_gamma_0 = averaging_over_area_non_interp(self.points, self.disk_area, gamma_rate)
+        gamma_avg = averaging_over_area(self.points, self.disk_area, z_linspace, gamma_rate)
+        return gamma_avg
 
-        xy_integrations_per_z_slice = np.array([[zi, np.mean(np.array(z_dict[zi])[:, 2])] for zi in z_dict.keys()])
-        interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:,0]), np.array(xy_integrations_per_z_slice[:,1]), kind='linear')
-
-        interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
-        gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
-        gamma_effective = regular_integration_1d(1 * interpolated_z_gamma, z_linspace)
-        return gamma_effective
-
-    def calculate_AdotP_effective_rate(self, z, u_z, f, f_ij, psi_i, psi_f, z_wv):
-        # for the A dot P hamiltonian
-        energy = f * cn.h / cn.e
-        eps_r = np.real(disspersion(energy)[1])
-        if eps_r == 1:
-            print("Warning : eps_r = 1  [might be unnormalized]")
-        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
-        dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, self.points)
-        if type(f_ij) is list:
-            pass
-        else:
-            gamma_func = non_approximated_gamma_m(u_z, self.Q, f_ij, f, psi_i, psi_f, z_wv, eps_r)
-        z_dict = create_dict_by_z(self.points, gamma_func)
-
-        xy_integrations_per_z_slice = np.array([[z, irregular_integration_delaunay_2d(z_dict[z])] for z in z_dict.keys()])
-        interpolated_z_gamma_func = interpolate.interp1d(np.array(xy_integrations_per_z_slice[:, 0]), np.array(xy_integrations_per_z_slice[:, 1]), kind='cubic')
-
-        interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
-        gamma_effective = regular_integration_1d(dipole_density * interpolated_z_gamma, z_linspace)
-
-        return gamma_effective
+    def check_rate_over_dipole(self, z_linspace, f_ij, d, normalize=False):
+        f_k = self.frequency
+        if normalize:
+            self.normalize(freq2energy(f_k))
+        u_z = self.e_field[:, 2]
+        gamma_avg = self.calculate_rate_over_z(z_linspace, u_z, f_ij, d)
+        return gamma_avg
 
     def get_effective_emission(self, file_name, f=None):
         if f is None:
@@ -385,51 +359,6 @@ class ElectricMode(object):
         gammas = np.array([self.calculate_effective_rate(z, u_z, f[i]) for i in tqdm(range(len(f)))])
         np.save(file_name, gammas)
 
-    def try_AdotP(self, z_wv, psi_i, psi_f):
-        z = self.points[:, 2]
-        u_z = self.e_field[:, 2]
-        gamma_max = self.calculate_effective_rate(z, u_z, self.frequency)
-        adotp_max = self.calculate_AdotP_effective_rate(z, u_z, self.frequency, psi_i, psi_f, z_wv)
-        print(gamma_max / adotp_max, gamma_max, adotp_max)
-
-    def save_AdotP_emission(self, wv_path, file_name=None, f_array=None):
-        z = self.points[:, 2]
-        u_z = self.e_field[:, 2]
-
-        wavetot, z_wv, levelstot = load_wavefunction(wv_path)
-        z_wv = z_wv * 1e-9
-        PER = 6
-        """
-        50.50.50.50
-        init_states = [0, PER + 2]  # states 0, 8
-        FINAL_STATE = PER + 1  # state 7
-        """
-        init_states = [1,2]  # states 0, 8
-        FINAL_STATE = 0  # state 7
-        gamma_rates = []
-
-        for INIT_STATE in init_states:
-            psi_i = normalize_wv(wavetot[:, INIT_STATE], z_wv)
-            psi_f = normalize_wv(wavetot[:, FINAL_STATE], z_wv)
-            energy_i = levelstot[INIT_STATE]
-            energy_f = levelstot[FINAL_STATE]
-
-            #plt.plot(0.3 * wavetot[:,INIT_STATE] ** 2 + levelstot[INIT_STATE])
-            #plt.plot(0.3 * wavetot[:, FINAL_STATE] ** 2 + levelstot[FINAL_STATE])
-            #plt.show()
-            f_ij = abs(energy_i - energy_f) * cn.e / cn.h
-            print("d = {}e*m".format(regular_integration_1d(psi_i * z_wv * psi_f, z_wv)))
-            print("E = {}meV".format(abs(energy_f - energy_i) / 1e-3))
-            print("f = {}THz".format(f_ij / 1e12))
-            if f_array is None:
-                f = [f_ij]
-            else:
-                f = f_array
-            adotp_gamma = [self.calculate_AdotP_effective_rate(z, u_z, f_ij, f[i], psi_i, psi_f, z_wv) for i in tqdm(range(len(f)))]
-            gammas = np.array([self.calculate_effective_rate(z, u_z, f[i]) for i in tqdm(range(len(f)))])
-            gamma_rates.append(adotp_gamma)
-        print("A = {}".format(gamma_rates))
-        print("B = {}".format(gammas))
 
     def average_field(self):
         points = self.points
@@ -646,21 +575,36 @@ def generate_dipole_along_z(d, z_linspace):
     dipole_density = d / (regular_integration_1d(d, z_linspace))
     return dipole_density
 
-def spontaneous_emission(d, f, eps_r=1):
+def spontaneous_emission(d, f, disp=True):
     hbar = cn.hbar #1.0545711818e-34
     eps_0 = cn.epsilon_0 #8.85418781762039e-12
+    if disp:
+        eps_r = np.real(disspersion(freq2energy(f))[1])
+    else:
+        eps_r = 1
     c = cn.speed_of_light
     w = 2 * np.pi * f
     res = ((w ** 3) * (abs(d) ** 2) * (eps_r ** 0.5)) / (3 * np.pi * eps_0 * hbar * (c ** 3))
     return res
 
-def Gamma_m(u, d, Q, f, f_m, eps_r):
+def Gamma_m(u, d, Q, f, f_m, eps_r=None):
     hbar = cn.hbar #1.0545711818e-34
     eps_0 = cn.epsilon_0 #8.85418781762039e-12
-    #eps_r = 1
+    if eps_r is None:
+        eps_r = np.real(disspersion(freq2energy(f_m))[1])
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
     res = ((abs(d) ** 2) * (abs(u) ** 2) * 4 * Q * w_m * w) / ((hbar * eps_0 * (eps_r ** 2) * np.pi) * (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2))
+    return res
+
+def Gamma_k(u, d, Q, f, f_k, eps_r=None):
+    hbar = cn.hbar #1.0545711818e-34
+    eps_0 = cn.epsilon_0 #8.85418781762039e-12
+    if eps_r is None:
+        eps_r = np.real(disspersion(freq2energy(f_k))[1])
+    w = 2 * np.pi * f
+    w_k = 2 * np.pi * f_k
+    res = ((abs(d) ** 2) * (abs(u) ** 2) * 4 * Q * w_k * w_k) / ((hbar * eps_0 * (eps_r ** 2) * np.pi) * (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2))
     return res
 
 def non_dipole_Gamma_m(u, prod, Q, f, f_m, eps_r):
@@ -686,7 +630,7 @@ def inner_product_field_gamma(prod, Q, f, f_m, eps_r):
     res = ((e / m) ** 2) * (Q * hbar / (w * eps_0 * (eps_r ** 2))) * (w_m / (4 * ((Q * (w - w_m)) ** 2) + w_m ** 2)) * prod
     return res
 
-def gamma_m(u, Q, f, f_m, eps_r):
+def gamma_m(u, Q, f, f_m, eps_r=None):
     # the relation between Gamma_m / Gamma_0
     w = 2 * np.pi * f
     w_m = 2 * np.pi * f_m
@@ -843,6 +787,13 @@ def averaging_over_area(points, area, z_linspace, gamma_func, kind=None):
                                                      np.array(xy_integrations_per_z_slice[:, 1]), kind=kind)
     interpolated_z_gamma = interpolated_z_gamma_func(z_linspace)
     return interpolated_z_gamma / area
+
+def averaging_over_area_non_interp(points, area, gamma_func):
+    z_dict = create_dict_by_z(points, gamma_func)
+    xy_integrations_per_z_slice = np.array(
+        [irregular_integration_delaunay_2d(z_dict[zi]) for zi in z_dict.keys()])
+    z_values = np.array([zi for zi in z_dict.keys()])
+    return xy_integrations_per_z_slice / area, z_values
 
 def run_emission_spectrum(device_spectrum_path, f_array=np.linspace(3e12, 4.8e12, 301), plot=False, verbose=True):
     paths = [
@@ -1162,7 +1113,7 @@ def non_approx_total_results(ULS_path, INJ_path):
         inj_eps_r = np.real(disspersion(parse_inj[1])[1])
         total_result = 1 / (1 / uls_non_app_res + 1 / inj_non_app_res)
         total_qw_list = 1 / (1 / uls_qw_list + 1 / inj_qw_list)
-        total_spontaneous = 1 / (spontaneous_emission(uls_dipole, uls_fij, uls_eps_r) + spontaneous_emission(inj_dipole, inj_fij, inj_eps_r))
+        total_spontaneous = 1 / (spontaneous_emission(uls_dipole, uls_fij, disp=True) + spontaneous_emission(inj_dipole, inj_fij, disp=True))
         total_res_dict[filename] = total_result
         total_qw_list_dict[filename] = total_qw_list
         total_spont_dict[filename] = total_spontaneous
@@ -1270,3 +1221,490 @@ def show_non_approx_enhancement(ULS_path, INJ_path, f_array):
     fig.legend(['Mode enhancement', 'ULS', 'Injector'], loc='lower center', ncol=3, fontsize=6, bbox_transform=fig.transFigure)
     fig.tight_layout()
     plt.show()
+
+
+def get_total_check_dipole_rate(e_path, wv_path, f_array):
+    files_path =r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\110122_updated_calculation"
+    E = load_modes(e_path)
+    points = E[0].points
+    z = points[:, 2] # same for all
+    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+
+    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    z_wv = z_wv * 1e-9
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+
+    total_spectrum = np.zeros(np.shape(f_array))
+    total_z_rate = np.zeros(np.shape(z_linspace))
+    spontaneous_rate = 0
+    total_rate = 0
+    dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, points)
+    for INIT_STATE in init_states:
+        psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        energy_i = levelstot[INIT_STATE]
+        energy_f = levelstot[FINAL_STATE]
+        delta_energy = abs(energy_i - energy_f)
+        e = cn.e
+        f_ij = energy2freq(delta_energy)
+        d = e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+        #print("f_ij = {}THz".format(f_ij / 1e12))
+        #print("Delta E = {}eV".format(delta_energy))
+        #print("d = {}".format(d / e * 1e9))
+        print("f_ij = {}THz;    Delta E = {}eV;     d = {}".format(f_ij / 1e12, delta_energy, d / e * 1e9))
+
+        total_rate_for_z = np.ufunc.reduce(np.add, [np.array(Ei.check_rate_over_dipole(z_linspace, f_ij,d)) for Ei in E])
+
+        current_total_rate = regular_integration_1d(total_rate_for_z * dipole_density, z_linspace)
+        current_spontaneous_rate = spontaneous_emission(d, f_ij)
+        plt.figure(1)
+        current_spectrum = np.zeros(np.shape(total_spectrum))
+        for Ei in E:
+            mode_spectrum = []
+            print("f_k = {}THz".format(Ei.freq_str))
+            for i in tqdm(range(len(f_array))):
+                f = f_array[i]
+                spectrum_for_z = Ei.check_rate_over_dipole(z_linspace, f, d)
+                mode_spectrum.append(regular_integration_1d(spectrum_for_z * dipole_density, z_linspace))
+            current_spectrum += np.array(mode_spectrum)
+        total_spectrum += current_spectrum
+        total_z_rate += total_rate_for_z
+        total_rate += current_total_rate
+        spontaneous_rate += current_spontaneous_rate
+    #plt.plot(z_linspace, dipole_density / max(dipole_density) * max(1/total_rate_for_z), 'gray' )
+    #plt.plot(z_linspace, 1/total_rate_for_z)
+    #plt.show()
+
+    return total_z_rate, spontaneous_rate, total_z_rate, z_linspace, dipole_density, total_spectrum
+
+def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=False, qwgammaplt=False, factorplt=False, spectrumplt=False, sumplt=False):
+    paths = [
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_3.0um'
+    ]
+    nQW = 12
+    enhancement_list = []
+    total_vs_z_list = []
+    spectrum_list = []
+    total_rate_list = []
+    spont_list = []
+    total_max=0
+    period_max = np.zeros(nQW)
+    ndip = 0
+    perLen = 30.68e-9
+    # Code repeatition, wth...
+    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    z_wv = z_wv * 1e-9
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+
+    if spectrumplt:
+        fig, axs = plt.subplots(3, 3)
+
+
+    for ax, e_path in enumerate(paths):
+        label = e_path[e_path.rfind(r'Ef'):]
+        print(label)
+        if '0.15' in e_path and '2.6' in e_path:
+            print("--- Bad data folder eV=0.15 rad=2.6um")
+            enhancement_list.append(np.array([float("NaN")] * len(enhancement_list[0])))
+            total_rate_list.append(np.array([float("NaN")] * len(total_rate_list[0])))
+            spont_list.append(np.array([float("NaN")] * len(spont_list[0])))
+            continue
+        total_rate, spontaneous_rate, total_rate_for_z, z_linspace, dipole_density, spectrum, used_f_array, gamma_k_list, spectrum_k_list = load_updated_dipole_rate(e_path, wv_path, f_array, sim_files_path)
+
+        print('Rate    [1] = {}       Rate    [2] = {}'.format(total_rate[0], total_rate[1]))
+        print('Spont   [1] = {}       Spont   [2] = {}'.format(spontaneous_rate[0], spontaneous_rate[1]))
+        print('Enhance [1] = {}       Enhance [2] = {}'.format(total_rate[0]/spontaneous_rate[0], total_rate[1]/spontaneous_rate[1]))
+        ndip = len(spontaneous_rate)
+        # calculating Fp for each dipole
+        enhancement_list.append(np.array(total_rate) / np.array(spontaneous_rate))
+        total_rate_list.append(np.array(total_rate))
+        spont_list.append(np.array(spontaneous_rate))
+
+        total_vs_z_list.append(total_rate_for_z)
+        spectrum_list.append(spectrum)
+
+        nsec_rates = (1 / np.array(total_rate_for_z)) / 1e-9
+
+        if zgammaplt:
+            if sumplt:
+                z_total = sum(np.array([total_rate_for_z[dip, :] for dip in range(ndip)]))
+                nsec_rate = (1 / z_total) / 1e-9
+                plt.plot(z_linspace / 1e-9, nsec_rate, label=label, zorder=2)
+                if total_max < max(nsec_rate):
+                    total_max = max(nsec_rate)
+            else:
+                for dip in range(ndip):
+                    nsec_rate_for_z = nsec_rates[dip,:]
+                    plt.figure(dip)
+                    plt.plot(z_linspace / 1e-9, nsec_rate_for_z, label=label, zorder=2)
+                    # Dipole graph normalization factor
+                    if total_max < max(nsec_rate_for_z):
+                        total_max = max(nsec_rate_for_z)
+                    plt.title('Dipole #{}'.format(dip+1))
+
+        if qwgammaplt:
+
+            # plotting each QW
+            zper = int(len(z_linspace) / nQW)
+
+            if sumplt:
+                z_total = sum(np.array([total_rate_for_z[dip, :] for dip in range(ndip)]))
+                nsec_rate = (1 / z_total) / 1e-9
+                for i in range(nQW):
+                    if i == 0 or i == (nQW - 1):
+                        plt.figure(i)
+                        #plt.subplot(2,1,1)
+                        qw_z = z_linspace[i * zper: (i + 1) * zper]
+                        plt.plot(qw_z / 1e-9, nsec_rate[i * zper: (i + 1) * zper],
+                             label=label)
+                        plt.title('Period #{}'.format(i + 1))
+                    # QW graph normalization factor
+                        if period_max[i] < max(nsec_rate[i * zper: (i + 1) * zper]):
+                            period_max[i] = max(nsec_rate[i * zper: (i + 1) * zper])
+
+            else:
+                for dip in range(ndip):
+                    nsec_rate_for_z = nsec_rates[dip, :]
+                    for i in range(nQW):
+                        if i == 0 or i == (nQW - 1):
+                            plt.figure(2 * i + dip)
+                            plt.title('Period #{}, dip #{}'.format(i + 1, dip + 1))
+                            ax1 = plt.subplot(2, 1, 1)
+                            qw_z = z_linspace[i * zper: (i+1) * zper]
+                            ax1.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i+1) * zper], label=label)
+
+                            # QW graph normalization factor
+                            if period_max[i] < max(nsec_rate_for_z[i * zper : (i+1) * zper]):
+                                period_max[i] = max(nsec_rate_for_z[i * zper : (i+1) * zper])
+                        ax1.legend(fontsize=6)
+        if spectrumplt:
+            # plotting the spectrum
+            hard_coded_fij = [4.27, 3.58]
+            axi = axs[int(ax / 3), ax % 3]
+            if sumplt:
+                total_spect = sum(np.array([spectrum[dip, :] for dip in range(ndip)]))
+                axs[int(ax / 3), ax % 3].plot(used_f_array / 1e12, total_spect / 1e6, 'b')
+                for dip in range(ndip):
+                    axs[int(ax / 3), ax % 3].axvline(hard_coded_fij[dip], linestyle=':', linewidth=0.5, c='b')
+                axi.set_title(label, fontsize=6)
+                axi.set_xlabel('Frequency [THz]', fontsize=6)
+                axi.set_ylabel('$\Gamma$ [$\mu$s$^-$$^1$]', fontsize=6)
+                plt.sca(axi)
+                plt.yticks(fontsize=6, rotation=90)
+                plt.xticks(np.linspace(used_f_array.min() / 1e12, used_f_array.max() / 1e12, 7), fontsize=6)
+
+            else:
+                hard_coded_color = ['b','r']
+                for dip in range(ndip):
+                    axs[int(ax / 3), ax % 3].plot(used_f_array / 1e12, spectrum[dip, :] , hard_coded_color[dip], label="Dip. #{}".format(dip+1))
+                    for S in spectrum_k_list[dip]:
+                        axs[int(ax / 3), ax % 3].plot(used_f_array / 1e12, S, linestyle='--', linewidth=0.4, c=hard_coded_color[dip])
+                    #axs[int(ax / 3), ax % 3].axvline(hard_coded_fij[dip], linestyle=':', linewidth=0.5, c=hard_coded_color[dip])
+                axi.set_title(label, fontsize=6)
+                axi.set_xlabel('Frequency [THz]', fontsize=6)
+                tx = axi.yaxis.get_offset_text()
+                tx.set_fontsize(6)
+                #axi.set_ylabel('$\Gamma$ [$\mu$s$^-$$^1$]', fontsize=6)
+                axi.set_ylabel('Spectrum [1]', fontsize=6)
+                plt.sca(axi)
+                plt.yticks(fontsize=6, rotation=90)
+                plt.xticks(np.linspace(used_f_array.min() / 1e12, used_f_array.max() / 1e12, 7), fontsize=6)
+
+    if zgammaplt:
+        if sumplt:
+            plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,
+                     linewidth=0.5)
+            plt.legend(fontsize=6)
+            plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+            plt.xlabel('z [nm]')
+            plt.tight_layout()
+            plt.show()
+        else:
+            for dip in range(ndip):
+                plt.figure(dip)
+                plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
+                plt.legend(fontsize=6)
+                plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                plt.xlabel('z [nm]')
+            plt.tight_layout()
+            plt.show()
+    if qwgammaplt:
+        # interpolating the wavefunctions - HARDCODED
+
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        psi_uls = wavetot[:, init_states[0]] * np.sqrt(1e9)
+        psi_inj = wavetot[:, init_states[1]] * np.sqrt(1e9)
+        psi_i = [psi_uls, psi_inj]
+        total_psi_uls = np.zeros(np.shape(z_linspace))
+        total_psi_inj = np.zeros(np.shape(z_linspace))
+        total_psi_f = np.zeros(np.shape(z_linspace))
+        if sumplt:
+            for i in range(nQW):
+                if i == 0 or i == (nQW - 1):
+                    plt.figure(i)
+                    OFFSET = 0e-9
+                    interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_f, kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_i[dip], kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_psi_f = interp_psi_f_func(z_linspace)
+                    interp_psi_i = interp_psi_i_func(z_linspace)
+                    qw_z = z_linspace[i * zper: (i + 1) * zper]
+                    #plt.plot(qw_z / 1e-9,dipole_density[i * zper: (i + 1) * zper] / max(dipole_density[i * zper: (i + 1) * zper]) *period_max[i], 'k--', zorder=1, linewidth=0.5)
+                    plt.legend(fontsize=6, loc='upper right')
+                    plt.xlabel('z [nm]')
+                    plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                    i_f_ratio = max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) / max(
+                        abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2)
+                    plt.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(
+                        abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i], 'k:',
+                             zorder=1, linewidth=0.5, label='|$\psi$$_i$|$^2$')
+                    plt.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(
+                        abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], 'k--', zorder=1,
+                             linewidth=0.5, label='|$\psi$$_f$|$^2$')
+                    plt.legend(fontsize=7)
+                    plt.tight_layout()
+            plt.show()
+        else:
+            for dip in range(ndip):
+                for i in range(nQW):
+                    if i == 0 or i == (nQW - 1):
+                        plt.figure(2 * i + dip)
+                        #plt.subplot(2, 1, 1)
+                        OFFSET = 0e-9
+                        interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_f, kind='cubic',
+                                                                 fill_value=0, bounds_error=False)
+                        interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_i[dip], kind='cubic',
+                                                                   fill_value=0, bounds_error=False)
+                        interp_dipole_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, np.array(psi_i[dip]) * np.array(psi_f) * z_wv, kind='cubic',
+                                                                   fill_value=0, bounds_error=False)
+                        interp_psi_f = interp_psi_f_func(z_linspace)
+                        interp_psi_i = interp_psi_i_func(z_linspace)
+                        colots_i = ['red','blue']
+                        #interp_dipole = interp_dipole_func(z_linspace)
+                        qw_z = z_linspace[i * zper: (i + 1) * zper]
+                        #plt.plot(qw_z / 1e-9, dipole_density[i * zper: (i + 1) * zper] / max(dipole_density[i * zper: (i + 1) * zper]) * period_max[i], 'k--', zorder=1,  linewidth=0.5)
+                        plt.xlabel('z [nm]')
+                        plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                        i_f_ratio = max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2)
+                        #plt.legend(fontsize=7)
+                        ax2 = plt.subplot(2, 1, 2)
+                        #plt.legend(fontsize=6)
+                        ax2.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i],color=colots_i[dip], label='|$\psi$$_i$|$^2$')
+                        ax2.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], color='green', label='|$\psi$$_f$|$^2$')
+                        ax2.legend(fontsize=8)
+                        #ax1 = plt.gca()
+                        ax2.set_ylabel('Wavefunction [a.u.]')
+                        #ax1.set_yticks([0,1])
+                        #ax2 = ax1.twinx()
+                        #ax2.set_ylabel('Wavefunction [a.u.]', color='b')
+                        #ax2.set_yticks([0,1])
+                        plt.tight_layout()
+                        #plt.plot(qw_z / 1e-9, interp_dipole[i * zper: (i + 1) * zper] / max(interp_dipole[i * zper: (i + 1) * zper]) * 0.15 * period_max[i], 'b--', zorder=1,linewidth=0.5)
+
+            plt.show()
+    if spectrumplt:
+        if sumplt:
+            fig.tight_layout()
+            plt.show()
+        else:
+            fig.tight_layout()
+            plt.show()
+    if factorplt:
+        if sumplt:
+            total_rate_arr = np.array([sum(total_rate_list[i]) for i in range(len(total_rate_list))])
+            spont_rate_arr = np.array([sum(spont_list[i]) for i in range(len(spont_list))])
+            enhance_array = total_rate_arr / spont_rate_arr
+            fp_array = enhance_array.reshape([3, 3])
+            generate_purcell_heatmap(fp_array)
+            plt.show()
+
+        else:
+            for dip in range(ndip):
+                enhance_array = np.array(enhancement_list)[:, dip]
+                fp_array = enhance_array.reshape([3, 3])
+                generate_purcell_heatmap(fp_array)
+                plt.show()
+
+
+    # 1. Plot the graph nicely, perhaps zoom in?
+    # 2. Purcell factor table
+    # 3. Plot the emission spectrum, when the transition frequency is mentioned with a vertical line
+    # 4. Does the enhancement is the sum of emissions?
+
+
+
+def save_updated_dipole_rate(e_path, wv_path, f_array, files_path):
+    # files_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\110122_updated_calculation"
+    E = load_modes(e_path)
+    ef = E[0].ef
+    rad = E[0].radius
+    points = E[0].points
+
+    z = points[:, 2]  # same for all
+    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+    dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, points)
+
+    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
+    z_wv = z_wv * 1e-9
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+
+    spectrum_per_dipole = np.zeros([len(init_states), len(f_array)])
+    avg_rate_for_z_per_dipole = np.zeros([len(init_states), len(z_linspace)])
+    avg_rate_per_dipole = np.zeros([len(init_states)])
+    gamma_k_list = [[] for i in range(len(init_states))]
+    spectrum_k_list = [[] for i in range(len(init_states))]
+    spontaneous_rate_per_dipole = np.zeros([len(init_states)])
+    header = r"\updated_dipole_rate_Ef_{}eV_rad_{}um".format(ef, rad)
+    file_name_header = files_path + header
+
+
+    for Ei in E:
+        f_k = Ei.frequency
+        Ei.normalize(freq2energy(f_k))
+        u_z = Ei.e_field[:, 2]
+        print("---  f_k = {}THz".format(Ei.freq_str))
+        for dip_idx, INIT_STATE in enumerate(init_states):
+            psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
+            psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+            energy_i = levelstot[INIT_STATE]
+            energy_f = levelstot[FINAL_STATE]
+            delta_energy = abs(energy_i - energy_f)
+            e = cn.e
+            f_ij = energy2freq(delta_energy)
+            d = e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+            print("------   f_ij = {}THz\n------   Delta E = {}eV\n------   d = {}".format(f_ij / 1e12, delta_energy, d / e * 1e9))
+
+
+            avg_rate_for_z = Ei.calculate_rate_over_z(z_linspace, u_z, f_ij, d)
+            #current_avg_rate = regular_integration_1d(avg_rate_for_z * dipole_density, z_linspace)
+            current_spontaneous_rate = spontaneous_emission(d, f_ij)
+
+            ### old way for obtaining a spectrum
+            #mode_spectrum = []
+            #for i in tqdm(range(len(f_array))):
+                #f = f_array[i]
+                #arbitrary_freq_for_z = Ei.calculate_rate_over_z(z_linspace, u_z, f, d)
+                #mode_spectrum.append(regular_integration_1d(arbitrary_freq_for_z * dipole_density, z_linspace))
+
+            omega = 2 * np.pi * f_array
+            omega_k = 2 * np.pi * f_k
+            Q = Ei.Q
+            S_k = (2 * Q * omega_k) / (np.pi * (4 * (Q ** 2) * (omega - omega_k) ** 2 + omega_k ** 2))
+            G_k = regular_integration_1d(avg_rate_for_z * dipole_density, z_linspace)
+            mode_spectrum = G_k * S_k
+            gamma_k_list[dip_idx].append(G_k)
+            spectrum_k_list[dip_idx].append(mode_spectrum)
+
+            spectrum_per_dipole[dip_idx, :] += np.array(mode_spectrum)
+            avg_rate_for_z_per_dipole[dip_idx, :] += avg_rate_for_z
+            #avg_rate_per_dipole[dip_idx] += current_avg_rate
+            spontaneous_rate_per_dipole[dip_idx] = current_spontaneous_rate
+
+    np.save(file_name_header + ".spectrum", spectrum_per_dipole)
+    np.save(file_name_header + ".zrate", avg_rate_for_z_per_dipole)
+    np.save(file_name_header + ".spont", spontaneous_rate_per_dipole)
+    np.save(file_name_header + ".zlinspce", z_linspace)
+    np.save(file_name_header + ".farray", f_array)
+    np.save(file_name_header + ".dipole", dipole_density)
+    np.save(file_name_header + ".Gk", gamma_k_list)
+    np.save(file_name_header + ".Sk", spectrum_k_list)
+    print("Saved {}\n\n.".format(header))
+
+def load_updated_dipole_rate(e_path, wv_path, f_array, files_path):
+    spectrum_per_dipole = None
+    avg_rate_for_z_per_dipole = None
+    spontaneous_rate_per_dipole = None
+    z_linspace = None
+    used_f_array = None
+    dipole_density = None
+    E = load_modes(e_path)
+    ef = E[0].ef
+    rad = E[0].radius
+    header = r"\updated_dipole_rate_Ef_{}eV_rad_{}um".format(ef, rad)
+    file_name_header = files_path + header
+    try:
+        spectrum_per_dipole = np.load(file_name_header + ".spectrum.npy")
+        avg_rate_for_z_per_dipole = np.load(file_name_header + ".zrate.npy")
+        spontaneous_rate_per_dipole = np.load(file_name_header + ".spont.npy") #/ len(E) # Important fix for the old files
+        z_linspace = np.load(file_name_header + ".zlinspce.npy")
+        used_f_array = np.load(file_name_header + ".farray.npy")
+        dipole_density = np.load(file_name_header + ".dipole.npy")
+        gamma_k_list = np.load(file_name_header + ".Gk.npy")
+        spectrum_k_list = np.load(file_name_header + ".Sk.npy")
+    except:
+        print("Couldn't load. Calc & save..... ")
+        save_updated_dipole_rate(e_path, wv_path, f_array, files_path)
+        spectrum_per_dipole = np.load(file_name_header + ".spectrum.npy")
+        avg_rate_for_z_per_dipole = np.load(file_name_header + ".zrate.npy")
+        spontaneous_rate_per_dipole = np.load(file_name_header + ".spont.npy")
+        z_linspace = np.load(file_name_header + ".zlinspce.npy")
+        used_f_array = np.load(file_name_header + ".farray.npy")
+        dipole_density = np.load(file_name_header + ".dipole.npy")
+        gamma_k_list = np.load(file_name_header + ".Gk.npy")
+        spectrum_k_list = np.load(file_name_header + ".Sk.npy")
+    print("Integrating for a total rate")
+    avg_rate_per_dipole = np.zeros(np.shape(spontaneous_rate_per_dipole))
+    for i in range(len(avg_rate_per_dipole)):
+        avg_rate_per_dipole[i] = regular_integration_1d(avg_rate_for_z_per_dipole[i,:] * dipole_density, z_linspace)
+    return avg_rate_per_dipole, spontaneous_rate_per_dipole, avg_rate_for_z_per_dipole, z_linspace, dipole_density, spectrum_per_dipole, used_f_array, gamma_k_list, spectrum_k_list
+
+def save_divergences(folder_path):
+    paths = [
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_3.0um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.6um',
+        r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_3.0um'
+    ]
+
+    RESOLUTION = 28
+    derivative_name = ['dX', 'dY', 'dZ', 'DIV']
+    for path in paths:
+        if '0.15' in path and '2.6' in path:
+            print("--- Bad data folder eV=0.15 rad=2.6um")
+            continue
+        #path = paths[6]
+        E = load_modes(path)
+        for Ek in E:
+            print('Ef_{}eV_rad_{}um_f_{}THz'.format(Ek.ef, Ek.radius, Ek.freq_str))
+            delta_E = freq2energy(Ek.frequency)
+            Ek.normalize(delta_E)
+            points = Ek.points
+            field_k = Ek.e_field
+            interp_field = []
+            for i in range(3):
+                interp_f, grid = interp3d(points, field_k[:, i], RESOLUTION)
+                interp_field.append(interp_f)
+            interp_field = np.array(interp_field)
+            grad_list = regular_grid_grads(interp_field, grid)
+
+
+            for i,g in enumerate(grad_list):
+                file_name = r"\Ef_{}eV_rad_{}um_f_{}THz_RES_{}_{}".format(Ek.ef, Ek.radius, Ek.freq_str, RESOLUTION, derivative_name[i])
+                file_path = folder_path + file_name
+                #generic_scatter_3d(grid, np.real(g), False)
+                np.save(file_path, g)
+            file_name = r"\Ef_{}eV_rad_{}um_f_{}THz_RES_{}_{}".format(Ek.ef, Ek.radius, Ek.freq_str, RESOLUTION, derivative_name[-1])
+            file_path = folder_path + file_name
+            div = sum(grad_list)
+            #generic_scatter_3d(grid, np.real(div), False)
+            np.save(file_path, div)
+            file_name = r"\Ef_{}eV_rad_{}um_f_{}THz_RES_{}_{}".format(Ek.ef, Ek.radius, Ek.freq_str, RESOLUTION, 'grid')
+            file_path = folder_path + file_name
+            np.save(file_path, grid)

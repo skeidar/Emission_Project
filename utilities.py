@@ -5,6 +5,7 @@ from scipy import constants as cn
 from scipy.interpolate import griddata
 from matplotlib import pyplot as plt
 from tqdm import tqdm
+from multiprocessing import Pool
 import plotly.express as px
 import pandas as pd
 import time
@@ -137,7 +138,7 @@ def interp1d_complex_function(original_range, func, new_range , kind='linear', b
 
 def inner_product_squared(points, field, z_func, func, area):
 
-    Vi, grid = interp3d(points, field, resolution=35)
+    Vi, grid = interp3d(points, field, resolution=25)
     f_dict = create_func_dict(grid, Vi)
 
     # plotting the grid:
@@ -247,10 +248,11 @@ def interp3d(points, V, resolution=None):
     y = points[:, 1]
     z = points[:, 2]
     grid = create_cylinder_grid(x, y, z, resolution)
-
+    #grid[:,2] = grid[:,2] * 10
     print("Interpolating...")
     Vi = griddata(points, V, grid, method='linear', fill_value=0, rescale=True)
     print("Done interpolating!")
+    grid[:, 2] = grid[:, 2]
     return Vi, grid
 
 def maximise_duplicates(points, func):
@@ -302,3 +304,139 @@ def freq2energy(frequnecy):
 def energy2freq(energy):
     # energy in eV, frequency in Hz
     return cn.e * energy / cn.h
+
+def round_scaleless(num, order):
+    if 0 < abs(num) < 1:
+        return np.round(num, int(abs(np.log10(abs(num)))) + order)
+    elif num !=0:
+        return np.round(num, order)
+    else:
+        return 0
+
+
+def multi_run_wrapper(args):
+    return grad(*args)
+
+
+def regular_grid_grads(vec, grid):
+    if np.shape(vec.T) == np.shape(grid):
+        vec = vec.T
+    print(np.shape(vec), np.shape(grid))
+    with Pool(processes=3) as p:
+        # grad_list = p.map(worker, range(5))
+        #grad_list = sum(np.array(p.map(multi_run_wrapper, [(vec[:,ax], grid, ax) for ax in range(3)])))
+        #grad_list = sum(np.array(p.starmap(grad, [(vec[:, ax], grid, ax) for ax in range(3)])))
+        grad_list = np.array(p.starmap(grad, [(vec[:, ax], grid, ax) for ax in range(3)]))
+    return np.array(grad_list)
+
+def grad(scalar_field, points, axis):
+    """
+    delta = 2022  # a large arbitrary number, points scale is micrometer
+        grad_list = []
+        dist_set = set()
+        for i in range(len(points)):
+            dist = abs(points[0,axis] - points[i,axis])
+            dist_set.add(dist)
+            if delta > dist > 0:
+                delta = dist
+        print("working on axis {}".format(axis))
+        for i in tqdm(range(len(points))):
+            p = points[i,:]
+            closest_positive_idx = -1
+            closest_negative_idx = -1
+            adjacent_points_idx = -1
+            min_positive_dist = 2022
+            for j,c in enumerate(points):
+                if j == i:
+                    continue
+                if round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
+                    current_positive_dist = c[axis] - p[axis]
+                    if min_dist > current_positive_dist > 0:
+                        min_dist = current_positive_dist
+                        closest_positive_idx = j
+            if closest_positive_idx != -1:
+                grad_list.append((scalar_field[closest_positive_idx] - scalar_field[i]) / delta)
+            else:
+                #probably happens on boundarys
+                for j,c in enumerate(points):
+                    if j == i:
+                        continue
+                    if round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
+                        closest_negative_idx = j
+                        break
+                if closest_negative_idx != -1:
+                    grad_list.append((scalar_field[i] - scalar_field[closest_negative_idx]) / delta)
+                # to add: what happens at the tips? there could be no points before and after
+                else:
+                    if axis == 2:
+                        continue
+                    else:
+                        for j, c in enumerate(points):
+                            if j == i:
+                                continue
+                            if round_scaleless(c[axis], 3) == round_scaleless(p[axis], 3) and (round_scaleless(
+                                    c[(axis + 1) % 2], 3) == round_scaleless(p[(axis + 1) % 2] - delta, 3)
+                                    or round_scaleless(c[(axis + 1) % 2], 3) == round_scaleless(
+                                    p[(axis + 1) % 2] + delta, 3)) and round_scaleless(c[2], 3) == round_scaleless(p[2], 3):
+                                adjacent_points_idx = j
+                                break
+                        if adjacent_points_idx != -1:
+                            grad_list.append(scalar_field[adjacent_points_idx])
+                        else:
+                            grad_list.append(float('nan'))
+        return grad_list
+
+    """
+    delta = 2022  # a large arbitrary number, points scale is micrometer
+    grad_list = []
+    dist_set = set()
+    for i in range(len(points)):
+        dist = abs(points[0,axis] - points[i,axis])
+        dist_set.add(dist)
+        if delta > dist > 0:
+            delta = dist
+    print("working on axis {}".format(axis))
+    for i in tqdm(range(len(points))):
+        p = points[i,:]
+        closest_point_idx = -1
+        prev_points_idx = -1
+        adjacent_points_idx = -1
+        for j,c in enumerate(points):
+            if j == i:
+                continue
+            if round_scaleless(c[axis] ,3) == round_scaleless(p[axis] + delta, 3) and round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
+            #if c[axis] == (p[axis] + delta) and c[(axis+1)%3] == p[(axis+1)%3] and c[(axis+2)%3]== p[(axis+2)%3]:
+                closest_point_idx = j
+                break
+        if closest_point_idx != -1:
+            grad_list.append((scalar_field[closest_point_idx] - scalar_field[i]) / delta)
+        else:
+            #probably happens on boundarys
+            for j,c in enumerate(points):
+                if j == i:
+                    continue
+                if round_scaleless(c[axis] ,3) == round_scaleless(p[axis] - delta, 3) and round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
+                    prev_points_idx = j
+                    break
+            if prev_points_idx != -1:
+                grad_list.append((scalar_field[i] - scalar_field[prev_points_idx]) / delta)
+            # to add: what happens at the tips? there could be no points before and after
+            else:
+                if axis == 2:
+                    continue
+                else:
+                    for j, c in enumerate(points):
+                        if j == i:
+                            continue
+                        if round_scaleless(c[axis], 3) == round_scaleless(p[axis], 3) and (round_scaleless(
+                                c[(axis + 1) % 2], 3) == round_scaleless(p[(axis + 1) % 2] - delta, 3)
+                                or round_scaleless(c[(axis + 1) % 2], 3) == round_scaleless(
+                                p[(axis + 1) % 2] + delta, 3)) and round_scaleless(c[2], 3) == round_scaleless(p[2], 3):
+                            adjacent_points_idx = j
+                            break
+                    if adjacent_points_idx != -1:
+                        grad_list.append(scalar_field[adjacent_points_idx])
+                    else:
+                        grad_list.append(float('nan'))
+    return grad_list
+
