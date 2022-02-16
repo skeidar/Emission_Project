@@ -1347,7 +1347,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                 for dip in range(ndip):
                     nsec_rate_for_z = nsec_rates[dip,:]
                     plt.figure(dip)
-                    plt.plot(z_linspace / 1e-9, nsec_rate_for_z, label=label, zorder=2)
+                    plt.plot(z_linspace / 1e-9, nsec_rate_for_z, label=label, zorder=10)
                     # Dipole graph normalization factor
                     if total_max < max(nsec_rate_for_z):
                         total_max = max(nsec_rate_for_z)
@@ -1380,14 +1380,17 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                         if i == 0 or i == (nQW - 1):
                             plt.figure(2 * i + dip)
                             plt.title('Period #{}, dip #{}'.format(i + 1, dip + 1))
-                            ax1 = plt.subplot(2, 1, 1)
+                            #ax1 = plt.subplot(2, 1, 1) ##HERE
+
                             qw_z = z_linspace[i * zper: (i+1) * zper]
-                            ax1.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i+1) * zper], label=label)
+                            #ax1.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i+1) * zper], label=label) ##HERE
+                            plt.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i + 1) * zper], label=label)
 
                             # QW graph normalization factor
                             if period_max[i] < max(nsec_rate_for_z[i * zper : (i+1) * zper]):
                                 period_max[i] = max(nsec_rate_for_z[i * zper : (i+1) * zper])
-                        ax1.legend(fontsize=6)
+                        #ax1.legend(fontsize=6)
+                        plt.legend(fontsize=6) ##HERE
         if spectrumplt:
             # plotting the spectrum
             hard_coded_fij = [4.27, 3.58]
@@ -1434,28 +1437,75 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
 
 
         if sumplt:
-            plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,
-                     linewidth=0.5)
-            plt.legend(fontsize=6)
+            #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1, linewidth=0.5)
+            plt.legend(fontsize=6, loc=1)
             plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
             plt.xlabel('z [nm]')
+            plt.title('Both dipoles included')
+            NICE_BLUE = '#365ba6'
+            BROWNISH_YELLOW = '#a68436'
+            ax1 = plt.gca()
+            ax2 = ax1.twinx()
+            ax1.set_zorder(ax2.get_zorder() + 1)
+            ax1.patch.set_visible(False)
+            ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
+            ax2.spines['right'].set_color('b')
+            ax2.tick_params(axis='y', colors='b')
+            for i in range(nQW):
+                OFFSET = 0e-9
+                ALPHA = 0.5
+                interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2, kind='cubic', fill_value=0, bounds_error=False)
+                interp_psi_uls_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[0]) ** 2, kind='cubic', fill_value=0, bounds_error=False)
+                interp_psi_inj_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[1]) ** 2, kind='cubic', fill_value=0, bounds_error=False)
+                interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + perLen * i + OFFSET, bandplot[:, 1],
+                                                            kind='linear',
+                                                            fill_value=0, bounds_error=False)
+                periods_args = np.logical_and(z_linspace >= (z_wv + perLen * i + OFFSET).min(),
+                                              z_linspace <= (z_wv + perLen * i + OFFSET).max())
+                interp_psi_f = interp_psi_f_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[FINAL_STATE] * MILI_TO_EV
+                interp_psi_uls = interp_psi_uls_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[init_states[0]] * MILI_TO_EV
+                interp_psi_inj = interp_psi_inj_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[init_states[1]] * MILI_TO_EV
+                interp_bandplot = interp_bandplot_func(z_linspace) - band_energy_diff * i  # + levelstot[0] * 10
+                #ax2.plot(z_linspace * 1e9, interp_psi_f, color='b', linestyle='--',  linewidth=0.6, zorder=1, alpha=ALPHA)
+                ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='b', linestyle='--', linewidth=0.6, zorder=1, alpha=ALPHA)
+                #ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1, alpha=ALPHA)
+                #ax2.plot(z_linspace * 1e9, interp_psi_i, color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_uls[periods_args], color='b', linewidth=0.6,
+                         zorder=1, alpha=ALPHA)
+                ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_inj[periods_args], color='b', linestyle=':', linewidth=0.6, zorder=1, alpha=ALPHA)
+                ax2.plot(z_linspace[periods_args] * 1e9, interp_bandplot[periods_args], color='black', linewidth=0.3, zorder=1, alpha=ALPHA)
+
+                #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='#365ba6', linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color=i_colour[dip], linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color='#365ba6', linewidth=0.5, zorder=1, alpha=ALPHA)
+
+                #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
+            legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$ - ULS','|$\psi$$_i$|$^2$ - INJ','Band Structure'], fontsize=8, loc=3)
+            for line in legend2.get_lines():
+                line.set_linewidth(1.0)
+            ax2.add_artist(legend2)
             plt.tight_layout()
             plt.show()
+
         else:
             for dip in range(ndip):
                 plt.figure(dip)
                 plt.legend(fontsize=6, loc=1)
                 plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
                 plt.xlabel('z [nm]')
-
+                NICE_BLUE = '#365ba6'
+                BROWNISH_YELLOW = '#a68436'
                 ax1 = plt.gca()
                 ax2 = ax1.twinx()
-                ax2.set_ylabel('Wavefunctions [a.u.]', color='#365ba6')
-                ax2.spines['right'].set_color('#365ba6')
-                ax2.tick_params(axis='y', colors='#365ba6')
+                ax1.set_zorder(ax2.get_zorder() + 1)
+                ax1.patch.set_visible(False)
+                ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
+                ax2.spines['right'].set_color('b')
+                ax2.tick_params(axis='y', colors='b')
                 # ax2.set_yticks([0,1])
                 for i in range(nQW):
                     OFFSET = 0e-9
+                    ALPHA = 0.5
                     interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2, kind='cubic',
                                                              fill_value=0, bounds_error=False)
                     interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[dip]) ** 2,
@@ -1469,12 +1519,16 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                     interp_psi_f = interp_psi_f_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[FINAL_STATE] * MILI_TO_EV
                     interp_psi_i = interp_psi_i_func(z_linspace) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[init_states[dip]] * MILI_TO_EV
                     interp_bandplot = interp_bandplot_func(z_linspace) - band_energy_diff * i  # + levelstot[0] * 10
-                    ax2.plot(z_linspace * 1e9, interp_psi_f, color='#365ba6', linestyle='--',  linewidth=0.3, zorder=1)
-                    ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1)
-                    ax2.plot(z_linspace[periods_args] * 1e9, interp_bandplot[periods_args], color='black',
-                             linestyle='--', linewidth=0.3, zorder=1)
-                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='#365ba6', linestyle='--', linewidth=0.5, zorder=1)
-                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color=i_colour[dip], linestyle='--', linewidth=0.5, zorder=1)
+                    #ax2.plot(z_linspace * 1e9, interp_psi_f, color='b', linestyle='--',  linewidth=0.6, zorder=1, alpha=ALPHA)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='b', linestyle='--', linewidth=0.6, zorder=1, alpha=ALPHA)
+                    #ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1, alpha=ALPHA)
+                    #ax2.plot(z_linspace * 1e9, interp_psi_i, color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                    ax2.plot(z_linspace[periods_args] * 1e9, interp_bandplot[periods_args], color='black', linewidth=0.3, zorder=1, alpha=ALPHA)
+
+                    #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], color='#365ba6', linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                    #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color=i_colour[dip], linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                    #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color='#365ba6', linewidth=0.5, zorder=1, alpha=ALPHA)
 
                 #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
                 legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc=3)
@@ -1493,39 +1547,96 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
         total_psi_uls = np.zeros(np.shape(z_linspace))
         total_psi_inj = np.zeros(np.shape(z_linspace))
         total_psi_f = np.zeros(np.shape(z_linspace))
+
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        psi_uls = wavetot[:, init_states[0]] * np.sqrt(1e9)
+        psi_inj = wavetot[:, init_states[1]] * np.sqrt(1e9)
+        psi_i = [psi_uls, psi_inj]
+        i_colour = ['#a63636' ,'#a68436']
+        MILI_TO_EV = 1000
+        BEAUTY_FACTOR = 1e6
+        band_energy_diff = (levelstot[0] - levelstot[7]) * MILI_TO_EV
+
+
+
         if sumplt:
             for i in range(nQW):
                 if i == 0 or i == (nQW - 1):
                     plt.figure(i)
-                    OFFSET = 0e-9
-                    interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_f, kind='cubic',
-                                                             fill_value=0, bounds_error=False)
-                    interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_i[dip], kind='cubic',
-                                                             fill_value=0, bounds_error=False)
-                    interp_psi_f = interp_psi_f_func(z_linspace)
-                    interp_psi_i = interp_psi_i_func(z_linspace)
-                    qw_z = z_linspace[i * zper: (i + 1) * zper]
-                    #plt.plot(qw_z / 1e-9,dipole_density[i * zper: (i + 1) * zper] / max(dipole_density[i * zper: (i + 1) * zper]) *period_max[i], 'k--', zorder=1, linewidth=0.5)
-                    plt.legend(fontsize=6, loc='upper right')
-                    plt.xlabel('z [nm]')
+                    plt.legend(fontsize=6, loc=1)
                     plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
-                    i_f_ratio = max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) / max(
-                        abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2)
-                    plt.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(
-                        abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i], 'k:',
-                             zorder=1, linewidth=0.5, label='|$\psi$$_i$|$^2$')
-                    plt.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(
-                        abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], 'k--', zorder=1,
-                             linewidth=0.5, label='|$\psi$$_f$|$^2$')
-                    plt.legend(fontsize=7)
-                    plt.tight_layout()
+                    plt.xlabel('z [nm]')
+                    NICE_BLUE = '#365ba6'
+                    BROWNISH_YELLOW = '#a68436'
+                    ax1 = plt.gca()
+                    ax2 = ax1.twinx()
+                    ax2.set_zorder(ax1.get_zorder() + 1)
+                    # ax1.patch.set_visible(False)
+                    ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
+                    ax2.spines['right'].set_color('b')
+                    ax2.tick_params(axis='y', colors='b')
+                    OFFSET = 0e-9
+                    ALPHA = 0.5
+                    qw_z = z_linspace[i * zper: (i + 1) * zper]
+                    interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2,
+                                                             kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_psi_uls_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[0]) ** 2,
+                                                             kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_psi_inj_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[1]) ** 2,
+                                                             kind='cubic',
+                                                             fill_value=0, bounds_error=False)
+                    interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + perLen * i + OFFSET,
+                                                                bandplot[:, 1],
+                                                                kind='linear',
+                                                                fill_value=0, bounds_error=False)
+                    periods_args = np.logical_and(z_linspace >= (z_wv + perLen * i + OFFSET).min(),
+                                                  z_linspace <= (z_wv + perLen * i + OFFSET).max())
+                    interp_psi_f = interp_psi_f_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
+                        FINAL_STATE] * MILI_TO_EV
+                    interp_psi_uls = interp_psi_uls_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
+                        init_states[0]] * MILI_TO_EV
+                    interp_psi_inj = interp_psi_inj_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
+                        init_states[1]] * MILI_TO_EV
+                    interp_bandplot = interp_bandplot_func(qw_z) - band_energy_diff * i  # + levelstot[0] * 10
+                    ax2.plot(qw_z * 1e9, interp_psi_f, color='b', linestyle='--', linewidth=0.6, zorder=1,
+                             alpha=ALPHA)
+                    # ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1, alpha=ALPHA)
+                    ax2.plot(qw_z * 1e9, interp_psi_uls, color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                    ax2.plot(qw_z * 1e9, interp_psi_inj, color='b', linestyle=':', linewidth=0.6, zorder=1, alpha=ALPHA)
+                    ax2.plot(qw_z * 1e9, interp_bandplot, color='black',
+                             linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                if i == (nQW - 1):
+                    legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$', 'Band Structure'], fontsize=8, loc=3,
+                                         framealpha=0.7)
+                elif i == 0:
+                    legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$ - ULS', '|$\psi$$_i$|$^2$ - INJ','Band Structure'], fontsize=8,
+                                         loc=2, framealpha=0.7)
+                for line in legend2.get_lines():
+                    line.set_linewidth(1.0)
+                ax2.add_artist(legend2)
+                plt.tight_layout()
             plt.show()
         else:
             for dip in range(ndip):
                 for i in range(nQW):
                     if i == 0 or i == (nQW - 1):
                         plt.figure(2 * i + dip)
+                        plt.legend(fontsize=6, loc=1)
+                        plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                        plt.xlabel('z [nm]')
+                        NICE_BLUE = '#365ba6'
+                        BROWNISH_YELLOW = '#a68436'
+                        ax1 = plt.gca()
+                        ax2 = ax1.twinx()
+                        ax2.set_zorder(ax1.get_zorder() + 1)
+                        #ax1.patch.set_visible(False)
+                        ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
+                        ax2.spines['right'].set_color('b')
+                        ax2.tick_params(axis='y', colors='b')
                         #plt.subplot(2, 1, 1)
+                        """
                         OFFSET = 0e-9
                         interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_f, kind='cubic',
                                                                  fill_value=0, bounds_error=False)
@@ -1543,20 +1654,55 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                         plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
                         i_f_ratio = max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2)
                         #plt.legend(fontsize=7)
-                        ax2 = plt.subplot(2, 1, 2)
+                        #ax2 = plt.subplot(2, 1, 2)
                         #plt.legend(fontsize=6)
-                        ax2.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i],color=colots_i[dip], label='|$\psi$$_i$|$^2$')
-                        ax2.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], color='green', label='|$\psi$$_f$|$^2$')
-                        ax2.legend(fontsize=8)
+                        #ax2.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i],color=colots_i[dip], label='|$\psi$$_i$|$^2$')
+                        #ax2.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], color='green', label='|$\psi$$_f$|$^2$')
+                        #ax2.legend(fontsize=8)
                         #ax1 = plt.gca()
-                        ax2.set_ylabel('Wavefunction [a.u.]')
+                        #ax2.set_ylabel('Wavefunction [a.u.]')
                         #ax1.set_yticks([0,1])
                         #ax2 = ax1.twinx()
                         #ax2.set_ylabel('Wavefunction [a.u.]', color='b')
                         #ax2.set_yticks([0,1])
                         plt.tight_layout()
                         #plt.plot(qw_z / 1e-9, interp_dipole[i * zper: (i + 1) * zper] / max(interp_dipole[i * zper: (i + 1) * zper]) * 0.15 * period_max[i], 'b--', zorder=1,linewidth=0.5)
-
+                        """
+                        OFFSET = 0e-9
+                        ALPHA = 0.5
+                        qw_z = z_linspace[i * zper: (i + 1) * zper]
+                        interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_f) ** 2,
+                                                                 kind='cubic',
+                                                                 fill_value=0, bounds_error=False)
+                        interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, abs(psi_i[dip]) ** 2,
+                                                                 kind='cubic',
+                                                                 fill_value=0, bounds_error=False)
+                        interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + perLen * i + OFFSET,
+                                                                    bandplot[:, 1],
+                                                                    kind='linear',
+                                                                    fill_value=0, bounds_error=False)
+                        periods_args = np.logical_and(z_linspace >= (z_wv + perLen * i + OFFSET).min(),
+                                                      z_linspace <= (z_wv + perLen * i + OFFSET).max())
+                        interp_psi_f = interp_psi_f_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
+                            FINAL_STATE] * MILI_TO_EV
+                        interp_psi_i = interp_psi_i_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
+                            init_states[dip]] * MILI_TO_EV
+                        interp_bandplot = interp_bandplot_func(qw_z) - band_energy_diff * i  # + levelstot[0] * 10
+                        ax2.plot(qw_z * 1e9, interp_psi_f, color='b', linestyle='--', linewidth=0.6, zorder=1,
+                                 alpha=ALPHA)
+                        # ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1, alpha=ALPHA)
+                        ax2.plot(qw_z * 1e9, interp_psi_i, color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                        ax2.plot(qw_z * 1e9, interp_bandplot, color='black',
+                                 linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
+                    if i == (nQW-1):
+                        legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc=3, framealpha=0.7)
+                    elif i == 0:
+                        legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$', 'Band Structure'], fontsize=8,
+                                             loc=2, framealpha=0.7)
+                    for line in legend2.get_lines():
+                        line.set_linewidth(1.0)
+                    ax2.add_artist(legend2)
+                    plt.tight_layout()
             plt.show()
     if spectrumplt:
         if sumplt:
