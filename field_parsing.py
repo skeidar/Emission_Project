@@ -6,6 +6,7 @@ import numpy as np
 import plotly.express as px
 import pandas as pd
 from matplotlib import pyplot as plt
+from copy import deepcopy
 from utilities import *
 from wavefunc import load_wavefunction, normalize_wv
 import csv
@@ -503,6 +504,32 @@ class ElectricMode(object):
         plt.title("Emission rate vs z")
         plt.xlabel('z [nm]')
         plt.ylabel('Rate [us]')
+
+class CylinderGridField(ElectricMode):
+    def __init__(self, path, ef, radius, frequency, Q, points, e_field):
+        super().__init__(path, ef, radius, frequency, Q)
+        self.e_field = e_field
+        self.points = points
+        self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
+
+    def compute_norm(self):
+        return cyclinder_grid_3d_integration(self.points, (self.e_norms) ** 2)
+
+    def normalize(self, energy):
+        self.use_disperssion(energy)
+        active_eps_r = self.active_eps_r
+        bulk_eps_r = self.bulk_eps_r
+        d_active_eps_r = self.d_active_eps_r
+        d_bulk_eps_r = self.d_bulk_eps_r
+        # using the effective epsilon for the normalization
+        z = self.points[:, 2]
+        z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+        d = dipole_locations(z_linspace)
+        effective_eps = active_eps_r
+        effective_derivative_eps = d_active_eps_r
+        normalization_results = 1 / (((np.real(effective_eps)) ** (-3 / 2)) * effective_derivative_eps)
+        self.e_field = self.e_field * (normalization_results / self.compute_norm()) ** 0.5
+        self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
 
 
 
@@ -1278,7 +1305,7 @@ def get_total_check_dipole_rate(e_path, wv_path, f_array):
 
     return total_z_rate, spontaneous_rate, total_z_rate, z_linspace, dipole_density, total_spectrum
 
-def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=False, qwgammaplt=False, factorplt=False, spectrumplt=False, sumplt=False):
+def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=False, qwgammaplt=False, factorplt=False, spectrumplt=False, sumplt=False, zflip=False, nsec=True):
     paths = [
         r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um',
         r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.6um',
@@ -1306,9 +1333,10 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
     bandplot[:, 0] = bandplot[:, 0] * 1e-9
     init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
-
+    Z_LEN = 360e-9
     if spectrumplt:
         fig, axs = plt.subplots(3, 3)
+
 
 
     for ax, e_path in enumerate(paths):
@@ -1337,21 +1365,41 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
         nsec_rates = (1 / np.array(total_rate_for_z)) / 1e-9
 
         if zgammaplt:
+            zgammaplt_titles = ["Dipole 1: ULS-LLS Transition", "Dipole 2: Injector-LLS Transition"]
             if sumplt:
                 z_total = sum(np.array([total_rate_for_z[dip, :] for dip in range(ndip)]))
                 nsec_rate = (1 / z_total) / 1e-9
-                plt.plot(z_linspace / 1e-9, nsec_rate, label=label, zorder=2)
+                if zflip:
+                    if nsec:
+                        plt.plot(z_linspace[::-1] / 1e-9, nsec_rate, label=label, zorder=2)
+                    else:
+                        plt.plot(z_linspace[::-1] / 1e-9, z_total /1e6, label=label, zorder=2) # flipping the z axis
+                else:
+                    if nsec:
+                        plt.plot(z_linspace / 1e-9, nsec_rate, label=label, zorder=2)
+                    else:
+                        plt.plot(z_linspace / 1e-9, z_total /1e6, label=label, zorder=2)  # flipping the z axis
                 if total_max < max(nsec_rate):
                     total_max = max(nsec_rate)
             else:
                 for dip in range(ndip):
                     nsec_rate_for_z = nsec_rates[dip,:]
+                    rate_for_z = total_rate_for_z[dip,:]
                     plt.figure(dip)
-                    plt.plot(z_linspace / 1e-9, nsec_rate_for_z, label=label, zorder=10)
+                    if zflip:
+                        if nsec:
+                            plt.plot(z_linspace[::-1] / 1e-9, nsec_rate_for_z, label=label, zorder=10)
+                        else:
+                            plt.plot(z_linspace[::-1] / 1e-9, rate_for_z / 1e6, label=label, zorder=10) # flipping the z axis
+                    else:
+                        if nsec:
+                            plt.plot(z_linspace / 1e-9, nsec_rate_for_z, label=label, zorder=10)
+                        else:
+                            plt.plot(z_linspace / 1e-9, rate_for_z / 1e6, label=label, zorder=10)  # flipping the z axis
                     # Dipole graph normalization factor
                     if total_max < max(nsec_rate_for_z):
                         total_max = max(nsec_rate_for_z)
-                    plt.title('Dipole #{}'.format(dip+1))
+                    plt.title(zgammaplt_titles[dip])
 
         if qwgammaplt:
 
@@ -1361,13 +1409,30 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
             if sumplt:
                 z_total = sum(np.array([total_rate_for_z[dip, :] for dip in range(ndip)]))
                 nsec_rate = (1 / z_total) / 1e-9
+
+
+
                 for i in range(nQW):
                     if i == 0 or i == (nQW - 1):
                         plt.figure(i)
                         #plt.subplot(2,1,1)
                         qw_z = z_linspace[i * zper: (i + 1) * zper]
-                        plt.plot(qw_z / 1e-9, nsec_rate[i * zper: (i + 1) * zper],
-                             label=label)
+                        if zflip:
+                            flip_z_total = z_total[::-1]
+                            per_z_total = flip_z_total[i * zper: (i + 1) * zper]
+                            per_z_total = per_z_total[::-1]
+                            flip_nsec_rate = nsec_rate[::-1]
+                            per_nsec_rate = flip_nsec_rate[i * zper: (i + 1) * zper]
+                            per_nsec_rate = per_nsec_rate[::-1]
+                            if nsec:
+                                plt.plot(qw_z[::-1] / 1e-9, per_nsec_rate, label=label)
+                            else:
+                                plt.plot(qw_z[::-1] / 1e-9, per_z_total / 1e6, label=label)
+                        else:
+                            if nsec:
+                                plt.plot(qw_z / 1e-9, nsec_rate[i * zper: (i + 1) * zper], label=label)
+                            else:
+                                plt.plot(qw_z / 1e-9, z_total[i * zper: (i + 1) * zper] / 1e6, label=label)
                         plt.title('Period #{}'.format(i + 1))
                     # QW graph normalization factor
                         if period_max[i] < max(nsec_rate[i * zper: (i + 1) * zper]):
@@ -1376,6 +1441,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
             else:
                 for dip in range(ndip):
                     nsec_rate_for_z = nsec_rates[dip, :]
+                    rate_for_z = total_rate_for_z[dip, :]
                     for i in range(nQW):
                         if i == 0 or i == (nQW - 1):
                             plt.figure(2 * i + dip)
@@ -1384,13 +1450,27 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
 
                             qw_z = z_linspace[i * zper: (i+1) * zper]
                             #ax1.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i+1) * zper], label=label) ##HERE
-                            plt.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i + 1) * zper], label=label)
-
+                            if zflip:
+                                flip_rate_for_z = rate_for_z[::-1]
+                                per_rate_for_z = flip_rate_for_z[i * zper: (i + 1) * zper]
+                                per_rate_for_z = per_rate_for_z[::-1]
+                                flip_nsec_for_z = nsec_rate_for_z[::-1]
+                                per_nsec_for_z = flip_nsec_for_z[i * zper: (i + 1) * zper]
+                                per_nsec_for_z = per_nsec_for_z[::-1]
+                                if nsec:
+                                    plt.plot(qw_z[::-1] / 1e-9, per_nsec_for_z, label=label) # flipping the z-axis
+                                else:
+                                    plt.plot(qw_z[::-1] / 1e-9, per_rate_for_z / 1e6, label=label)  # flipping the z-axis
+                            else:
+                                if nsec:
+                                    plt.plot(qw_z / 1e-9, nsec_rate_for_z[i * zper: (i + 1) * zper], label=label)
+                                else:
+                                    plt.plot(qw_z / 1e-9, rate_for_z[i * zper: (i + 1) * zper] / 1e6, label=label)  # flipping the z-axis
                             # QW graph normalization factor
                             if period_max[i] < max(nsec_rate_for_z[i * zper : (i+1) * zper]):
                                 period_max[i] = max(nsec_rate_for_z[i * zper : (i+1) * zper])
                         #ax1.legend(fontsize=6)
-                        plt.legend(fontsize=6) ##HERE
+                        #plt.legend(fontsize=6) ##HERE
         if spectrumplt:
             # plotting the spectrum
             hard_coded_fij = [4.27, 3.58]
@@ -1435,13 +1515,15 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
         BEAUTY_FACTOR = 2e6
         band_energy_diff = (levelstot[0] - levelstot[7]) * MILI_TO_EV
 
-
         if sumplt:
             #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1, linewidth=0.5)
-            plt.legend(fontsize=6, loc=1)
-            plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+            plt.legend(fontsize=6, loc='upper left', framealpha=0.7, bbox_to_anchor=(0, -0.2), ncol=2)
+            if nsec:
+                plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+            else:
+                plt.ylabel('$\Gamma$(z) [$\mu$sec$^-$$^1$]')
             plt.xlabel('z [nm]')
-            plt.title('Both dipoles included')
+            plt.title('Both Transitions Included')
             NICE_BLUE = '#365ba6'
             BROWNISH_YELLOW = '#a68436'
             ax1 = plt.gca()
@@ -1451,6 +1533,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
             ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
             ax2.spines['right'].set_color('b')
             ax2.tick_params(axis='y', colors='b')
+            ax2.yaxis.set_ticklabels([])
             for i in range(nQW):
                 OFFSET = 0e-9
                 ALPHA = 0.5
@@ -1480,18 +1563,21 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                 #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color='#365ba6', linewidth=0.5, zorder=1, alpha=ALPHA)
 
                 #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
-            legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$ - ULS','|$\psi$$_i$|$^2$ - INJ','Band Structure'], fontsize=8, loc=3)
+            legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$-ULS', '|$\psi$$_i$|$^2$-INJ', 'Band Structure'], fontsize=7, loc='upper right', framealpha=0.7, bbox_to_anchor=(1, -0.2))
             for line in legend2.get_lines():
                 line.set_linewidth(1.0)
             ax2.add_artist(legend2)
-            plt.tight_layout()
+            plt.tight_layout(rect=[0,0.02,1,1])
             plt.show()
 
         else:
             for dip in range(ndip):
                 plt.figure(dip)
-                plt.legend(fontsize=6, loc=1)
-                plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                plt.legend(fontsize=6, loc='upper left', framealpha=0.7, bbox_to_anchor=(0, -0.2), ncol=2)
+                if nsec:
+                    plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                else:
+                    plt.ylabel('$\Gamma$(z) [$\mu$sec$^-$$^1$]')
                 plt.xlabel('z [nm]')
                 NICE_BLUE = '#365ba6'
                 BROWNISH_YELLOW = '#a68436'
@@ -1502,6 +1588,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                 ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
                 ax2.spines['right'].set_color('b')
                 ax2.tick_params(axis='y', colors='b')
+                ax2.yaxis.set_ticklabels([])
                 # ax2.set_yticks([0,1])
                 for i in range(nQW):
                     OFFSET = 0e-9
@@ -1531,12 +1618,13 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                     #ax2.plot(z_linspace[periods_args] * 1e9, interp_psi_i[periods_args], color='#365ba6', linewidth=0.5, zorder=1, alpha=ALPHA)
 
                 #plt.plot(z_linspace / 1e-9, dipole_density / max(dipole_density) * total_max, 'k--', zorder=1,  linewidth=0.5)
-                legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc=3)
+                legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc='upper right', framealpha=0.7, bbox_to_anchor=(1, -0.2))
                 for line in legend2.get_lines():
                     line.set_linewidth(1.0)
                 ax2.add_artist(legend2)
-                plt.tight_layout()
+                plt.tight_layout(rect=[0,0.02,1,1])
             plt.show()
+
     if qwgammaplt:
         # interpolating the wavefunctions - HARDCODED
 
@@ -1556,15 +1644,15 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
         MILI_TO_EV = 1000
         BEAUTY_FACTOR = 1e6
         band_energy_diff = (levelstot[0] - levelstot[7]) * MILI_TO_EV
-
-
-
         if sumplt:
             for i in range(nQW):
                 if i == 0 or i == (nQW - 1):
                     plt.figure(i)
-                    plt.legend(fontsize=6, loc=1)
-                    plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                    plt.legend(fontsize=6, loc='upper left', bbox_to_anchor=(0, -0.2), ncol=2)
+                    if nsec:
+                        plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                    else:
+                        plt.ylabel('$\Gamma$(z) [$\mu$sec$^-$$^1$]')
                     plt.xlabel('z [nm]')
                     NICE_BLUE = '#365ba6'
                     BROWNISH_YELLOW = '#a68436'
@@ -1575,6 +1663,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                     ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
                     ax2.spines['right'].set_color('b')
                     ax2.tick_params(axis='y', colors='b')
+                    ax2.yaxis.set_ticklabels([])
                     OFFSET = 0e-9
                     ALPHA = 0.5
                     qw_z = z_linspace[i * zper: (i + 1) * zper]
@@ -1607,24 +1696,23 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                     ax2.plot(qw_z * 1e9, interp_psi_inj, color='b', linestyle=':', linewidth=0.6, zorder=1, alpha=ALPHA)
                     ax2.plot(qw_z * 1e9, interp_bandplot, color='black',
                              linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
-                if i == (nQW - 1):
-                    legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$', 'Band Structure'], fontsize=8, loc=3,
-                                         framealpha=0.7)
-                elif i == 0:
-                    legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$ - ULS', '|$\psi$$_i$|$^2$ - INJ','Band Structure'], fontsize=8,
-                                         loc=2, framealpha=0.7)
-                for line in legend2.get_lines():
-                    line.set_linewidth(1.0)
-                ax2.add_artist(legend2)
-                plt.tight_layout()
+
+                    legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$-ULS', '|$\psi$$_i$|$^2$-INJ', 'Band Structure'], fontsize=8, loc='upper right', framealpha=0.7, bbox_to_anchor=(1, -0.2))
+                    for line in legend2.get_lines():
+                        line.set_linewidth(1.0)
+                    ax2.add_artist(legend2)
+                    plt.tight_layout(rect=[0,0.05,1,1])
             plt.show()
         else:
             for dip in range(ndip):
                 for i in range(nQW):
                     if i == 0 or i == (nQW - 1):
                         plt.figure(2 * i + dip)
-                        plt.legend(fontsize=6, loc=1)
-                        plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                        plt.legend(fontsize=6, loc='upper left', bbox_to_anchor=(0, -0.2), ncol=2)
+                        if nsec:
+                            plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
+                        else:
+                            plt.ylabel('$\Gamma$(z) [$\mu$sec$^-$$^1$]')
                         plt.xlabel('z [nm]')
                         NICE_BLUE = '#365ba6'
                         BROWNISH_YELLOW = '#a68436'
@@ -1635,39 +1723,7 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                         ax2.set_ylabel('Wavefunctions [a.u.]', color='b')
                         ax2.spines['right'].set_color('b')
                         ax2.tick_params(axis='y', colors='b')
-                        #plt.subplot(2, 1, 1)
-                        """
-                        OFFSET = 0e-9
-                        interp_psi_f_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_f, kind='cubic',
-                                                                 fill_value=0, bounds_error=False)
-                        interp_psi_i_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, psi_i[dip], kind='cubic',
-                                                                   fill_value=0, bounds_error=False)
-                        interp_dipole_func = interpolate.interp1d(z_wv + perLen * i + OFFSET, np.array(psi_i[dip]) * np.array(psi_f) * z_wv, kind='cubic',
-                                                                   fill_value=0, bounds_error=False)
-                        interp_psi_f = interp_psi_f_func(z_linspace)
-                        interp_psi_i = interp_psi_i_func(z_linspace)
-                        colots_i = ['red','blue']
-                        #interp_dipole = interp_dipole_func(z_linspace)
-                        qw_z = z_linspace[i * zper: (i + 1) * zper]
-                        #plt.plot(qw_z / 1e-9, dipole_density[i * zper: (i + 1) * zper] / max(dipole_density[i * zper: (i + 1) * zper]) * period_max[i], 'k--', zorder=1,  linewidth=0.5)
-                        plt.xlabel('z [nm]')
-                        plt.ylabel('$\Gamma$$^-$$^1$(z) [nsec]')
-                        i_f_ratio = max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2)
-                        #plt.legend(fontsize=7)
-                        #ax2 = plt.subplot(2, 1, 2)
-                        #plt.legend(fontsize=6)
-                        #ax2.plot(qw_z / 1e-9, abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_i[i * zper: (i + 1) * zper]) ** 2) * 1 * i_f_ratio * period_max[i],color=colots_i[dip], label='|$\psi$$_i$|$^2$')
-                        #ax2.plot(qw_z / 1e-9, abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2 / max(abs(interp_psi_f[i * zper: (i + 1) * zper]) ** 2) * 1 * period_max[i], color='green', label='|$\psi$$_f$|$^2$')
-                        #ax2.legend(fontsize=8)
-                        #ax1 = plt.gca()
-                        #ax2.set_ylabel('Wavefunction [a.u.]')
-                        #ax1.set_yticks([0,1])
-                        #ax2 = ax1.twinx()
-                        #ax2.set_ylabel('Wavefunction [a.u.]', color='b')
-                        #ax2.set_yticks([0,1])
-                        plt.tight_layout()
-                        #plt.plot(qw_z / 1e-9, interp_dipole[i * zper: (i + 1) * zper] / max(interp_dipole[i * zper: (i + 1) * zper]) * 0.15 * period_max[i], 'b--', zorder=1,linewidth=0.5)
-                        """
+                        ax2.yaxis.set_ticklabels([])
                         OFFSET = 0e-9
                         ALPHA = 0.5
                         qw_z = z_linspace[i * zper: (i + 1) * zper]
@@ -1688,21 +1744,25 @@ def run_total_check_dipole_rate(wv_path, f_array, sim_files_path, zgammaplt=Fals
                         interp_psi_i = interp_psi_i_func(qw_z) / BEAUTY_FACTOR - band_energy_diff * i + levelstot[
                             init_states[dip]] * MILI_TO_EV
                         interp_bandplot = interp_bandplot_func(qw_z) - band_energy_diff * i  # + levelstot[0] * 10
-                        ax2.plot(qw_z * 1e9, interp_psi_f, color='b', linestyle='--', linewidth=0.6, zorder=1,
+                        ax2.plot(qw_z * 1e9, interp_psi_f, color='b', linestyle='--', linewidth=0.8, zorder=1,
                                  alpha=ALPHA)
                         # ax2.plot(z_linspace * 1e9, interp_psi_i, color=i_colour[dip], linestyle='--', linewidth=0.3, zorder=1, alpha=ALPHA)
-                        ax2.plot(qw_z * 1e9, interp_psi_i, color='b', linewidth=0.6, zorder=1, alpha=ALPHA)
+                        ax2.plot(qw_z * 1e9, interp_psi_i, color='b', linewidth=0.8, zorder=1, alpha=ALPHA)
                         ax2.plot(qw_z * 1e9, interp_bandplot, color='black',
-                                 linestyle='--', linewidth=0.5, zorder=1, alpha=ALPHA)
-                    if i == (nQW-1):
-                        legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc=3, framealpha=0.7)
-                    elif i == 0:
-                        legend2 = plt.legend(['|$\psi$$_f$|$^2$', '|$\psi$$_i$|$^2$', 'Band Structure'], fontsize=8,
-                                             loc=2, framealpha=0.7)
-                    for line in legend2.get_lines():
-                        line.set_linewidth(1.0)
-                    ax2.add_artist(legend2)
-                    plt.tight_layout()
+                                 linestyle='--', linewidth=0.6, zorder=1, alpha=ALPHA)
+                        d = dipole_density[::-1][i * zper: (i + 1) * zper]
+                        #d = d * max(interp_bandplot) / max(d)
+
+                        legend2 = plt.legend(['|$\psi$$_f$|$^2$','|$\psi$$_i$|$^2$','Band Structure'], fontsize=8, loc='upper right', framealpha=0.7, bbox_to_anchor=(1, -0.2))
+                        for line in legend2.get_lines():
+                            line.set_linewidth(1.0)
+                        ax2.add_artist(legend2)
+                        #ax3 = ax1.twinx()
+                        #ax3.plot(qw_z * 1e9, d / max(d), linestyle='--', linewidth=0.8, color='red', alpha=ALPHA)
+                        #ax3.yaxis.set_visible(False)
+                        #legend3 = plt.legend(['Active layer'], fontsize=8, loc=4)
+                        #ax3.add_artist(legend3)
+                        plt.tight_layout(rect=[0,0.05,1,1])
             plt.show()
     if spectrumplt:
         if sumplt:
@@ -1899,3 +1959,63 @@ def save_divergences(folder_path):
             file_name = r"\Ef_{}eV_rad_{}um_f_{}THz_RES_{}_{}".format(Ek.ef, Ek.radius, Ek.freq_str, RESOLUTION, 'grid')
             file_path = folder_path + file_name
             np.save(file_path, grid)
+
+def generate_slow_varying_fields():
+    INTERP_RESOLUTION = 28
+    LAMBDA = 20e-6
+    E0 = 1
+    # loading the points from the an arbitrary field
+    dummy_path = r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um\\'
+    dummy_fields = load_modes(dummy_path)
+    dummy_E = dummy_fields[0]
+    dummy_ef = str(dummy_E.ef)
+    dummy_radius = str(dummy_E.radius)
+    dummy_frequency = str(dummy_E.frequency / 1e12) + 'e12'
+    dummy_Q = str(dummy_E.Q)
+    dummy_points = dummy_E.points
+    dummy_e_field = dummy_E.e_field
+    slow_field = np.array([E0 * np.exp(1j * 2 * np.pi * p[2] / LAMBDA) for p in dummy_points])
+    vec_slow_field = np.zeros(np.shape(dummy_e_field), dtype='complex_')
+    vec_slow_field[:, 2] = slow_field + 1
+    E = deepcopy(dummy_E)
+    E.e_field = vec_slow_field
+    E.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in E.e_field])
+
+    # creating a grid and a field to work with
+    field_interp, grid = interp3d(dummy_points, vec_slow_field, INTERP_RESOLUTION)
+    slow_interp_field = np.array([E0 * np.exp(1j * 2 * np.pi * p_grid[2] / LAMBDA) for p_grid in grid])
+    vec_slow_interp_field = np.zeros(np.shape(grid), dtype='complex_')
+    vec_slow_interp_field[:, 2] = slow_interp_field +1
+    E_interp = CylinderGridField(dummy_path, dummy_ef, dummy_radius, dummy_frequency, dummy_Q, grid, vec_slow_interp_field)
+
+    return E, E_interp
+
+
+def compare_Gamma_k_methods(wv_path):
+    E, E_interp = generate_slow_varying_fields()
+    E.normalize(freq2energy(E.frequency))
+    E_interp.normalize(freq2energy(E_interp.frequency))
+    u_z = E_interp.e_field[:,2]
+    z = E_interp.points[:,2]
+    wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
+    z_wv = z_wv * 1e-9
+    bandplot[:, 0] = bandplot[:, 0] * 1e-9
+    init_states = [2]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+    for INIT_STATE in init_states:
+        psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        d = cn.e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+        energy_i = levelstot[INIT_STATE]
+        energy_f = levelstot[FINAL_STATE]
+        delta_energy = abs(energy_i - energy_f)
+        f_ij = energy2freq(delta_energy)
+        gamma_k_result = Gamma_k(u=u_z, d=d, Q=E_interp.Q, f=f_ij, f_k=E_interp.frequency, eps_r=None)
+        plt.plot(z,gamma_k_result)
+        plt.show()
+
+
+    #dip_app_Gamma = Gamma_k() # does it needed to be integrated?
+
+    #non_app_Gamma =
+

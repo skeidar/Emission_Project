@@ -3,6 +3,7 @@ from wavefunc import load_wavefunction, normalize_wv
 from matplotlib import pyplot as plt
 
 
+
 if __name__ == "__main__":
     file_name = r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\test.npy"
     csv_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data"
@@ -12,18 +13,43 @@ if __name__ == "__main__":
     INJ_path = r'C:\Shaked\Technion\QCL_Project\logs\21_12_21_injector'
     new_logs_path = r'C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\15_12_2021'
     EM_path= r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution'
-    f_array = np.linspace(3e12, 4.8e12, 301)
+    sim_files_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\050222"
+    divergence_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\11_02_22_divergences"
+    f_array = np.linspace(3e12, 4.8e12, 101)
     #f_array = np.linspace(3e12, 4.8e12, 11)
-
+    # f_array = np.linspace(3e12, 4.8e12, 301)
+    e_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um"
 
     E = load_modes(r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um")
-    for Ei in E:
-        energy = freq2energy(Ei.frequency)
-        Ei.normalize(energy)
-        Ei.scatter_plot_3d()
-        #Ei.plot_2d_z_rho_slice()
-        Ei.plot_gamma_vs_freq_along_z()
 
+
+    #save_divergences(divergence_path)
+    #test = np.load(divergence_path + r"\Ef_0.25eV_rad_2.2e-06um_RES_31_dZ.npy")
+    compare_Gamma_k_methods(wv_path)
+
+    #generic_scatter_3d(points, np.real(E[0].e_field[:, 2]), False)
+    #generic_scatter_3d(grid, np.real(interp_f), False)
+
+    #for Ei in E:
+        #energy = freq2energy(Ei.frequency)
+        #Ei.normalize(energy)
+        #Ei.scatter_plot_3d()
+        #Ei.plot_2d_z_rho_slice()
+        #Ei.plot_gamma_vs_freq_along_z()
+
+    #generic_scatter_3d(grid, testi, False)
+    #num_div = divergence(np.array([fi, fi, fi]))#, steps2)
+    #dvgrns(np.array([fi, fi, fi]), grid)
+    #generic_scatter_3d(grid, np.ones(len(grid)))
+    #generic_scatter_3d(points, f, True)
+    #generic_scatter_3d(grid, fi, True)
+    #print(np.shape(E_field.T[0]))
+    #print(divergence(interpE.T, steps_grid))
+
+
+
+
+    #run_total_check_dipole_rate(wv_path, f_array, sim_files_path,qwgammaplt=True, sumplt=True, zflip=True, nsec=True)
 
     #x = E[0].points[:, 0]
     #y = E[0].points[:, 1]

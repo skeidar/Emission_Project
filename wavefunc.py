@@ -323,13 +323,19 @@ def plot_wavefunctions_along_z(wv_path, zdush):
 if __name__ == "__main__":
     wv = Wavefunction("APL_2019")
     wv_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\2-well_APL_2019\2-well_APL_2019"
-    wavetot, z_wv, levelstot = load_wavefunction(wv_path)
-    z_wv = z_wv * 1e-9
+    wtf = r"C:\Shaked\Technion\QCL_Project\Wavefunctions\50.0_10.0_0.0\50.0_10.0_0.0"
+    wavetot, z_wv, levelstot, _ = load_wavefunction(wv_path)
+    #z_wv = z_wv * 1e-9
     ULS_index = 2
     injector_index = 1
     LLS_index = 0
-
-
-    testing_shifts_APL()
+    for i in range(len(wavetot[0,:])):
+        for j in range(len(wavetot[0, :])):
+            psi_f = wavetot[:,i]
+            psi_i = wavetot[:,j]
+            dip = regular_integration_1d(psi_i * psi_f * z_wv,z_wv)
+            if 2.7 <= dip <= 3:
+                print(dip, i, j)
+    #testing_shifts_APL()
 
 
