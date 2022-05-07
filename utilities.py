@@ -157,6 +157,31 @@ def inner_product_squared(points, field, z_func, func, area):
     res = irregular_integration_delaunay_2d(squared_xy_terms) / area
     return res
 
+def non_avg_inner_product_calculation_over_reg_grid(grid, field_dict, z_func, func):
+    ## almost like "inner_product_squared" but not abs-squared
+    ## the generation of interpolated field will happen outside the function
+    z = grid[:, 2]
+    xy_terms = []
+    print("Inner product calculation")
+    for x,y in tqdm(zip(grid[:, 0], grid[:, 1]), total=len(z)):
+        xy_func = np.array([field_dict[x][y][zi] for zi in z])
+        u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        interp_field = u_z_interp(z_func)
+        xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_func)])
+    #res = irregular_integration_delaunay_2d(squared_xy_terms) / area
+    return np.array(xy_terms)
+
+def extend_periodic_wavefunction(z_wv, wv_func, new_z):
+    PER_LEN = 30.68e-9
+    num_of_periods = 12
+    wv_result = np.zeros(np.shape(new_z))
+    for per in range(num_of_periods):
+        per_z = z_wv + per * PER_LEN
+        interp_wv = interpolate.interp1d(per_z, wv_func, kind='linear', bounds_error=False, fill_value=0)
+        new_wv = interp_wv(new_z)
+        wv_result += new_wv
+    return wv_result
+
 def inner_prodcut_with_field2(p, u, z_func, func, A):
     z_dict = create_dict_by_z(p, u)
     xy_integrations_per_z_slice = np.array([[zi, irregular_integration_delaunay_2d(z_dict[zi]) / A] for zi in z_dict.keys()])

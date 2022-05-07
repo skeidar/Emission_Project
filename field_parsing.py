@@ -570,6 +570,7 @@ def dipole_locations(z_linspace):
         dipole_width = 3e-9
         LAYER4 = 5.35e-9
         LAYER5 = 3.38e-9
+
         # sum * 12 is larger than the device's z-length
         TOTAL_LAYERS = LAYER1 + LAYER2 + LAYER3 + LAYER4 + LAYER5 + dipole_width
         dipole_layer_offset = z_linspace.max() - (LAYER1 + LAYER2 + LAYER3)
@@ -633,6 +634,39 @@ def Gamma_k(u, d, Q, f, f_k, eps_r=None):
     w_k = 2 * np.pi * f_k
     res = ((abs(d) ** 2) * (abs(u) ** 2) * 4 * Q * w_k * w_k) / ((hbar * eps_0 * (eps_r ** 2) * np.pi) * (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2))
     return res
+
+def Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=None):
+    e = cn.e
+    m = cn.m_e * 0.067
+    hbar = cn.hbar
+    eps_0 = cn.epsilon_0
+    if eps_r is None:
+        eps_r = np.real(disspersion(freq2energy(f_k))[1])
+    w = 2 * np.pi * f
+    w_k = 2 * np.pi * f_k
+    u_prod = u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv)
+    div_prod = np.zeros(np.shape(u_prod)) #div_term_product(u_z_interp, psi_i, psi_f, z_wv)
+    avg_abs_sqrd_term = average_sum_of_prods(u_prod, div_prod, area)
+    res = ((2 * hbar * e ** 2) / (m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term
+
+    return res
+
+
+def u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
+    func = np.conj(psi_f) * np.gradient(psi_i, z_wv)
+    return non_avg_inner_product_calculation_over_reg_grid(points_q, u_z_q_dict, z_wv, func)
+
+
+def average_sum_of_prods(prod1, prod2, area):
+    ## assuming [[xi, yi, prod],...]
+    ## assuming same x, y for both
+    xy_terms = []
+    print("Averaging XY")
+    for i,(x, y) in enumerate(tqdm(zip(prod1[:, 0], prod1[:, 1]), total=len(prod1[:, 0]))):
+        xy_terms.append((x, y, abs(2 * prod1[i,2]+prod2[i,2])**2))
+    res = irregular_integration_delaunay_2d(xy_terms) / area
+    return res
+
 
 def non_dipole_Gamma_m(u, prod, Q, f, f_m, eps_r):
     e = cn.e
@@ -804,9 +838,7 @@ def generate_purcell_heatmap(data=[[4206, None, 3399], [2926, 2009, 1872], [2743
     plt.ylabel('Graphene $E_f$ [eV]')
     plt.show()
 
-def averaging_over_area(points, area, z_linspace, gamma_func, kind=None):
-    if kind is None:
-        kind = 'cubic'
+def averaging_over_area(points, area, z_linspace, gamma_func, kind='cubic'):
     z_dict = create_dict_by_z(points, gamma_func)
     xy_integrations_per_z_slice = np.array(
         [[zi, irregular_integration_delaunay_2d(z_dict[zi])] for zi in z_dict.keys()])
@@ -1924,7 +1956,7 @@ def save_divergences(folder_path):
         r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_3.0um'
     ]
 
-    RESOLUTION = 28
+    RESOLUTION = 25
     derivative_name = ['dX', 'dY', 'dZ', 'DIV']
     for path in paths:
         if '0.15' in path and '2.6' in path:
@@ -1945,7 +1977,6 @@ def save_divergences(folder_path):
             interp_field = np.array(interp_field)
             grad_list = regular_grid_grads(interp_field, grid)
 
-
             for i,g in enumerate(grad_list):
                 file_name = r"\Ef_{}eV_rad_{}um_f_{}THz_RES_{}_{}".format(Ek.ef, Ek.radius, Ek.freq_str, RESOLUTION, derivative_name[i])
                 file_path = folder_path + file_name
@@ -1960,10 +1991,10 @@ def save_divergences(folder_path):
             file_path = folder_path + file_name
             np.save(file_path, grid)
 
-def generate_slow_varying_fields():
-    INTERP_RESOLUTION = 28
-    LAMBDA = 20e-6
-    E0 = 1
+def generate_slow_varying_fields(wavelength):
+    INTERP_RESOLUTION = 25
+    LAMBDA = 20e-2
+    E0 = 2
     # loading the points from the an arbitrary field
     dummy_path = r'C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um\\'
     dummy_fields = load_modes(dummy_path)
@@ -1974,34 +2005,41 @@ def generate_slow_varying_fields():
     dummy_Q = str(dummy_E.Q)
     dummy_points = dummy_E.points
     dummy_e_field = dummy_E.e_field
-    slow_field = np.array([E0 * np.exp(1j * 2 * np.pi * p[2] / LAMBDA) for p in dummy_points])
+    slow_field = np.array([E0 * np.ones(np.shape(p[2])) + E0 * np.cos(2 * np.pi * p[2] / wavelength) for p in dummy_points])
     vec_slow_field = np.zeros(np.shape(dummy_e_field), dtype='complex_')
-    vec_slow_field[:, 2] = slow_field + 1
+    vec_slow_field[:, 2] = slow_field
     E = deepcopy(dummy_E)
     E.e_field = vec_slow_field
     E.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in E.e_field])
 
     # creating a grid and a field to work with
     field_interp, grid = interp3d(dummy_points, vec_slow_field, INTERP_RESOLUTION)
-    slow_interp_field = np.array([E0 * np.exp(1j * 2 * np.pi * p_grid[2] / LAMBDA) for p_grid in grid])
+    slow_interp_field = np.array([E0 * np.ones(np.shape(p_grid[2])) + E0 * np.cos(2 * np.pi * p_grid[2] / wavelength) for p_grid in grid])
     vec_slow_interp_field = np.zeros(np.shape(grid), dtype='complex_')
-    vec_slow_interp_field[:, 2] = slow_interp_field +1
+    vec_slow_interp_field[:, 2] = slow_interp_field
     E_interp = CylinderGridField(dummy_path, dummy_ef, dummy_radius, dummy_frequency, dummy_Q, grid, vec_slow_interp_field)
 
     return E, E_interp
 
 
 def compare_Gamma_k_methods(wv_path):
-    E, E_interp = generate_slow_varying_fields()
+    E, E_interp = generate_slow_varying_fields(wavelength=5.4343e-1)
     E.normalize(freq2energy(E.frequency))
     E_interp.normalize(freq2energy(E_interp.frequency))
-    u_z = E_interp.e_field[:,2]
-    z = E_interp.points[:,2]
+    u_z = E_interp.e_field[:, 2]
+    z = E_interp.points[:, 2]
+    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
     wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
     bandplot[:, 0] = bandplot[:, 0] * 1e-9
     init_states = [2]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
+    dipole_density = generate_dipole_density(dipole_locations(z_linspace), z_linspace, E_interp.points)
+    periods = range(12)
+    PER_LEN = 30.68e-9
+
+    field_dict = create_func_dict(E_interp.points, u_z)
+
     for INIT_STATE in init_states:
         psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
         psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
@@ -2010,12 +2048,36 @@ def compare_Gamma_k_methods(wv_path):
         energy_f = levelstot[FINAL_STATE]
         delta_energy = abs(energy_i - energy_f)
         f_ij = energy2freq(delta_energy)
+        print(f_ij, E_interp.frequency)
+        LAM = 2e-7
+        test_e = 1e3 * np.ones(np.shape(z_wv)) + 1e3* np.cos(2*np.pi/LAM * z_wv)
+        integ2 = regular_integration_1d(psi_i * psi_f * z_wv, z_wv)
+        integ1 = regular_integration_1d(psi_f * np.gradient(psi_i,z_wv), z_wv)
+        # Gamma_k part (approximated treatment)
         gamma_k_result = Gamma_k(u=u_z, d=d, Q=E_interp.Q, f=f_ij, f_k=E_interp.frequency, eps_r=None)
-        plt.plot(z,gamma_k_result)
-        plt.show()
+        averaged_gamma_k = averaging_over_area(E_interp.points, E_interp.disk_area, z_linspace, gamma_k_result)
+        G_k = regular_integration_1d(averaged_gamma_k * dipole_density, z_linspace)
+        extend_periodic_wavefunction(z_wv, psi_f * np.gradient(psi_i,z_wv), z_linspace)
+        # plt.plot(z, gamma_k_result)
+        # plt.plot(z_linspace, averaged_gamma_k)
+        # plt.show()
 
-
-    #dip_app_Gamma = Gamma_k() # does it needed to be integrated?
-
-    #non_app_Gamma =
+        # Gamma_k_q part (non approximated)
+        # z_wv + per * PER_LEN
+        # Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=None):
+        gamma_per_period = []
+        for per in periods:
+            print(per)
+            #plt.plot(z_wv + per * PER_LEN, per + abs(np.gradient(psi_i,z_wv + per * PER_LEN) * psi_f) / max(abs(np.gradient(psi_i,z_wv + 0 * PER_LEN) * psi_f)))
+            momentum_int = cn.hbar * regular_integration_1d(psi_f * np.gradient(psi_i, z_wv + per * PER_LEN), z_wv + per * PER_LEN)
+            space_int = cn.m_e * 0.067 * 2 * np.pi * f_ij * regular_integration_1d(psi_f * psi_i * (z_wv + 0 * PER_LEN), z_wv + 0 * PER_LEN)
+            #print("p_intg / z_intg = {}".format(momentum_int / space_int))
+            # probably can become more efficient by working on each period separately
+            gamma_per_period.append(Gamma_k_q(u_z_q_dict=field_dict, points_q=E_interp.points, psi_f=psi_f, psi_i=psi_i, z_wv=z_wv + per * PER_LEN, Q=E_interp.Q, f=f_ij, f_k=E_interp.frequency, area=E_interp.disk_area))
+        total_gamma_k_q = sum(gamma_per_period)
+        print(G_k, total_gamma_k_q)
+        print("1/12 * Gamma1/Gamma2 =           {}".format((total_gamma_k_q / G_k) * (1 /12)))
+        print("1/12 * Gamma1/Gamma2 * 2/pi =    {}".format((total_gamma_k_q / G_k) * (1 /12) * (2 / np.pi)))
+        print(gamma_per_period)
+        #plt.show()
 
