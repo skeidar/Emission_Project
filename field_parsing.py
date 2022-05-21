@@ -595,11 +595,14 @@ def generate_dipole_density(d, z_linspace, points):
 
         A = 1
         # the dipole normalized density isn't affected by the dipole strength
-        dipole_density = d / (regular_integration_1d(d, z_linspace) * A)
+        Lwv = 30.68e-9
+        Nqw = round((z_linspace[-1] - z_linspace[0]) / Lwv)
+        dipole_density = Nqw * d / (regular_integration_1d(d, z_linspace) * A)
         return dipole_density
 
 def generate_dipole_along_z(d, z_linspace):
     # the dipole normalized density isn't affected by the dipole strength
+
     dipole_density = d / (regular_integration_1d(d, z_linspace))
     return dipole_density
 
@@ -647,7 +650,7 @@ def Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=N
     u_prod = u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv)
     div_prod = np.zeros(np.shape(u_prod)) #div_term_product(u_z_interp, psi_i, psi_f, z_wv)
     avg_abs_sqrd_term = average_sum_of_prods(u_prod, div_prod, area)
-    res = ((2 * hbar * e ** 2) / (m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term
+    res = ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term
 
     return res
 
@@ -1992,7 +1995,7 @@ def save_divergences(folder_path):
             np.save(file_path, grid)
 
 def generate_slow_varying_fields(wavelength):
-    INTERP_RESOLUTION = 25
+    INTERP_RESOLUTION = 100
     LAMBDA = 20e-2
     E0 = 2
     # loading the points from the an arbitrary field
@@ -2023,12 +2026,12 @@ def generate_slow_varying_fields(wavelength):
 
 
 def compare_Gamma_k_methods(wv_path):
-    E, E_interp = generate_slow_varying_fields(wavelength=5.4343e-1)
+    E, E_interp = generate_slow_varying_fields(wavelength=30e-9)
     E.normalize(freq2energy(E.frequency))
     E_interp.normalize(freq2energy(E_interp.frequency))
     u_z = E_interp.e_field[:, 2]
     z = E_interp.points[:, 2]
-    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
+    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 100000)
     wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
     z_wv = z_wv * 1e-9
     bandplot[:, 0] = bandplot[:, 0] * 1e-9
@@ -2039,6 +2042,8 @@ def compare_Gamma_k_methods(wv_path):
     PER_LEN = 30.68e-9
 
     field_dict = create_func_dict(E_interp.points, u_z)
+    plt.plot(E_interp.points[:,2], abs(u_z))
+    plt.show()
 
     for INIT_STATE in init_states:
         psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
@@ -2076,8 +2081,8 @@ def compare_Gamma_k_methods(wv_path):
             gamma_per_period.append(Gamma_k_q(u_z_q_dict=field_dict, points_q=E_interp.points, psi_f=psi_f, psi_i=psi_i, z_wv=z_wv + per * PER_LEN, Q=E_interp.Q, f=f_ij, f_k=E_interp.frequency, area=E_interp.disk_area))
         total_gamma_k_q = sum(gamma_per_period)
         print(G_k, total_gamma_k_q)
-        print("1/12 * Gamma1/Gamma2 =           {}".format((total_gamma_k_q / G_k) * (1 /12)))
-        print("1/12 * Gamma1/Gamma2 * 2/pi =    {}".format((total_gamma_k_q / G_k) * (1 /12) * (2 / np.pi)))
+        print("1/12 * Gamma1/Gamma2 =           {}".format((total_gamma_k_q / G_k)))
+        print("1/12 * Gamma1/Gamma2 * 2/pi =    {}".format((total_gamma_k_q / G_k) * (2 / np.pi)))
         print(gamma_per_period)
         #plt.show()
 

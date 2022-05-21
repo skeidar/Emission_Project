@@ -163,11 +163,22 @@ def non_avg_inner_product_calculation_over_reg_grid(grid, field_dict, z_func, fu
     z = grid[:, 2]
     xy_terms = []
     print("Inner product calculation")
-    for x,y in tqdm(zip(grid[:, 0], grid[:, 1]), total=len(z)):
+    from time import time
+    print(np.shape(grid))
+    xy_set = set()
+    for x, y in zip(grid[:, 0], grid[:, 1]):
+        xy_set.add((x,y))
+    #for x,y in tqdm(zip(grid[:, 0], grid[:, 1]), total=len(z)):\
+    for x,y in tqdm(xy_set, total=len(xy_set)):
+        #t0 = time()
         xy_func = np.array([field_dict[x][y][zi] for zi in z])
+        #print("t1 = {}".format(time() - t0))
         u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        #print("t2 = {}".format(time() - t0))
         interp_field = u_z_interp(z_func)
+        #print("t3 = {}".format(time() - t0))
         xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_func)])
+        #print("t4 = {}".format(time() - t0))
     #res = irregular_integration_delaunay_2d(squared_xy_terms) / area
     return np.array(xy_terms)
 
