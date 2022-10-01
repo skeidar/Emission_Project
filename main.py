@@ -25,7 +25,49 @@ if __name__ == "__main__":
 
     #save_divergences(divergence_path)
     #test = np.load(divergence_path + r"\Ef_0.25eV_rad_2.2e-06um_RES_31_dZ.npy")
-    compare_Gamma_k_methods(wv_path)
+    #wv_list = [b * 10 ** i for i in range(-10,-3) for b in [3,5]]
+
+
+    """
+    # Creating the zoomed graphs
+    wv_list = [i * 10 ** j for j in range(-9,-5) for i in range(1,10)]
+    gamma_list = []
+
+    for wavelength in wv_list:
+        res = compare_Gamma_k_methods(wv_path, wavelength)
+        gamma_list.append(res)
+    plt.plot(wv_list, gamma_list, '--o')
+    plt.xscale('log')
+    plt.xlabel('Wavelength [m]')
+    plt.ylabel('Ratio [1]')
+
+
+    np.save(r'C:\Shaked\Technion\QCL_Project\logs\comparison_22_05_22\comparison_23_05_22_focus_with_23', compare_Gamma_k_methods)
+    plt.show()
+    """
+    # adding the divegnece terms for compariosn
+    #wv_list = [5e-3, 5e-8, 5e-9]
+    #wv_list = [b * 10 ** i for i in range(-11, -3) for b in [3, 5]]
+    wv_list = [b * 10 ** i for i in range(-11, -4) for b in [1,2,3,4,5,7,8]]
+    gamma_col_list = []
+    gamma_div_list = []
+    g_k = []
+    for wavelength in wv_list:
+        res = compare_Gamma_k_methods(wv_path, wavelength)
+        gamma_col_list.append(res[0])
+        gamma_div_list.append(res[1])
+        g_k.append(res[2])
+    #np.save(r'C:\Shaked\Technion\QCL_Project\logs\comparison_30_05_22\gamma_coloumb_res19_high_freqs.npy', gamma_col_list)
+    #np.save(r'C:\Shaked\Technion\QCL_Project\logs\comparison_30_05_22\gamma_div_res19_high_freqs.npy', gamma_div_list)
+    #np.save(r'C:\Shaked\Technion\QCL_Project\logs\comparison_30_05_22\gamma_k_res19_high_freqs.npy', g_k)
+
+    plt.plot(wv_list, np.array(gamma_col_list) / np.array(g_k), '--o',wv_list,np.array(gamma_div_list) / np.array(g_k), 'r--o' )
+
+    plt.xscale('log')
+    plt.xlabel('Wavelength [m]')
+    plt.ylabel('Ratio [1]')
+    plt.show()
+    # comapring the rates
 
     #generic_scatter_3d(points, np.real(E[0].e_field[:, 2]), False)
     #generic_scatter_3d(grid, np.real(interp_f), False)

@@ -163,23 +163,22 @@ def non_avg_inner_product_calculation_over_reg_grid(grid, field_dict, z_func, fu
     z = grid[:, 2]
     xy_terms = []
     print("Inner product calculation")
-    from time import time
-    print(np.shape(grid))
     xy_set = set()
     for x, y in zip(grid[:, 0], grid[:, 1]):
         xy_set.add((x,y))
-    #for x,y in tqdm(zip(grid[:, 0], grid[:, 1]), total=len(z)):\
+    #for x,y in tqdm(zip(grid[:, 0], grid[:, 1]), total=len(z)):
+    """ #4
     for x,y in tqdm(xy_set, total=len(xy_set)):
-        #t0 = time()
         xy_func = np.array([field_dict[x][y][zi] for zi in z])
-        #print("t1 = {}".format(time() - t0))
         u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
-        #print("t2 = {}".format(time() - t0))
         interp_field = u_z_interp(z_func)
-        #print("t3 = {}".format(time() - t0))
         xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_func)])
-        #print("t4 = {}".format(time() - t0))
-    #res = irregular_integration_delaunay_2d(squared_xy_terms) / area
+    """
+    for x, y in tqdm(xy_set, total=len(xy_set)):
+        xy_func = np.array([field_dict[x][y][zi] for zi in z])
+        u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        interp_field = u_z_interp(z_func)
+        xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_func)])
     return np.array(xy_terms)
 
 def extend_periodic_wavefunction(z_wv, wv_func, new_z):
@@ -252,12 +251,15 @@ def averaging_comparison(func, points, area, z_func):
     plt.plot(abs(mean_field[:, 0]), abs(mean_field[:, 1]), abs(mean_field[:, 0]), abs(mean_field[:, 2]))
     plt.show()
 
-def create_cylinder_grid(x,y,z, resolution=None):
+def create_cylinder_grid(x,y,z, resolution=None, super_res_z=False):
+    print("Creating grid")
     if resolution is None:
         resolution = 100
     R = max(np.sqrt(x ** 2 + y ** 2))
 
     zg = np.linspace(z.min(), z.max(), resolution)
+    if super_res_z:
+        zg = np.linspace(z.min(), z.max(), resolution * 1500)
     xg = np.linspace(x.min(), x.max(), resolution)
     yg = np.linspace(y.min(), y.max(), resolution)
     xy_grid = list()
@@ -275,15 +277,16 @@ def create_cylinder_grid(x,y,z, resolution=None):
         for xi, yi in xy_grid:
             cylinder_grid.append(np.array([xi, yi, zi]))
     cylinder_grid = np.array(cylinder_grid)
+    print("done creating grid")
     return cylinder_grid
 
 
 
-def interp3d(points, V, resolution=None):
+def interp3d(points, V, resolution=None, super_res_z=False):
     x = points[:, 0]
     y = points[:, 1]
     z = points[:, 2]
-    grid = create_cylinder_grid(x, y, z, resolution)
+    grid = create_cylinder_grid(x, y, z, resolution, super_res_z)
     #grid[:,2] = grid[:,2] * 10
     print("Interpolating...")
     Vi = griddata(points, V, grid, method='linear', fill_value=0, rescale=True)
