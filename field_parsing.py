@@ -202,6 +202,94 @@ class ElectricMode(object):
             plt.ylabel(r"z [m]")
         plt.show()
 
+    def Epolar_plot(self, fig=None):
+        """
+        assuming the field is E(z)*E(r,theta)
+        plotting |E(r,theta)|
+        """
+        e_norms = self.e_norms
+        x, y, z = self.points.T
+        # finding the polar image in z values
+        polar_norms_min = []
+        polar_norms_max = []
+        for i, zi in enumerate(z):
+            # z=0 (the z axis is inverted)
+            if zi == round_scaleless(z.max(),2):
+                polar_norms_min.append([x[i],y[i], e_norms[i]])
+            # z=360nm (the z axis is inverted)
+            if zi == 0:
+                polar_norms_max.append([x[i], y[i], e_norms[i]])
+        polar_norms_min = np.array(polar_norms_min).T
+        polar_norms_max = np.array(polar_norms_max).T
+        x_norms_min, y_norms_min, norms_func_min = polar_norms_min
+        x_norms_max, y_norms_max, norms_func_max = polar_norms_max
+
+        if fig is None:
+            fig = plt.figure()
+            ax1 = fig.add_subplot(121)
+            ax2 = fig.add_subplot(122)
+        else:
+            ax1 = fig.add_subplot(221)
+            ax2 = fig.add_subplot(222)
+        # create x-y points to be used in heatmap
+        xi = np.linspace(x_norms_min.min(), x_norms_min.max(), 1000)
+        yi = np.linspace(y_norms_min.min(), y_norms_min.max(), 1000)
+        xa = np.linspace(x_norms_min.min(), x_norms_min.max(), 1000)
+        ya = np.linspace(y_norms_min.min(), y_norms_min.max(), 1000)
+
+        # Interpolate for plotting
+        zg_min = griddata((x_norms_min, y_norms_min), norms_func_min, (xi[None, :], yi[:, None]), method='cubic')
+        zg_max = griddata((x_norms_max, y_norms_max), norms_func_max, (xa[None, :], ya[:, None]), method='cubic')
+        im1 = ax1.contourf(xi / 1e-6, yi / 1e-6, zg_min, 50, cmap=plt.cm.plasma)
+        im2 = ax2.contourf(xa / 1e-6, ya / 1e-6, zg_max, 50, cmap=plt.cm.plasma)
+        #ax1.scatter(x_norms_min / 1e-6, y_norms_min / 1e-6)
+        #ax2.scatter(x_norms_max / 1e-6, y_norms_max / 1e-6)
+        ax1.set_xlabel('x [$\mu$m]')
+        ax1.set_ylabel('y [$\mu$m]')
+        ax1.set_title(r'Magnitude |E(r,$\theta$)| @ z=0nm')
+        ax2.set_xlabel('x [$\mu$m]')
+        ax2.set_ylabel('y [$\mu$m]')
+        ax2.set_title(r'Magnitude |E(r,$\theta$)| @ z=360nm')
+
+        fig.colorbar(im1, ax=ax1)
+        fig.colorbar(im2, ax=ax2)
+        if fig is None:
+            plt.show()
+        return fig
+
+    def Ez_plot(self, fig=None):
+        """
+        assuming the field is E(z)*E(r,theta)
+        plotting |E(z)|
+        """
+        e_norms = self.e_norms
+        x, y, z = self.points.T
+        # finding the polar image in z values
+
+        zi = np.linspace(z.min(), round_micro_meter(z.max(), 4), 1000)
+        Ez_interp_res = averaging_over_area(self.points, self.disk_area, zi, e_norms)
+        if fig is None:
+            fig = plt.figure()
+            # reversing z is mandatory because graphene is at z=0
+            plt.plot(zi[::-1] / 1e-9, Ez_interp_res)
+            plt.xlabel('z [nm]')
+            plt.ylabel('Mean |E(z)|')
+            plt.title('Mean magnitude |E(z)|')
+            plt.show()
+        else:
+            ax3 = fig.add_subplot(212)
+            ax3.plot(zi[::-1] / 1e-9, Ez_interp_res)
+            ax3.set_xlabel('z [nm]')
+            ax3.set_ylabel('Mean |E(z)|')
+            ax3.set_title('Mean magnitude |E(z)|')
+        return fig
+    def Epolar_Ez_plot(self):
+        fig = plt.figure()
+        fig = self.Epolar_plot(fig)
+        fig = self.Ez_plot(fig)
+        fig.tight_layout()
+        plt.show()
+
     def plot_gamma_vs_freq_along_z(self):
         x = self.points[:,0]
         y = self.points[:,1]
@@ -218,7 +306,7 @@ class ElectricMode(object):
         x_max = round_micro_meter(x[maximum_idx],3)
         y_max = round_micro_meter(y[maximum_idx],3)
 
-        # some points appear more than once with different values of field. 
+        # some points appear more than once with different values of field.
         # it also happens with z=0.36000000001 and z=0.36, and their values could differ by a lot.
         # so i plot the maximal value between the two
         """
