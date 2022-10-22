@@ -212,12 +212,13 @@ class ElectricMode(object):
         # finding the polar image in z values
         polar_norms_min = []
         polar_norms_max = []
+        print(z.max(), round_scaleless(z.max(),2))
         for i, zi in enumerate(z):
             # z=0 (the z axis is inverted)
-            if zi == round_scaleless(z.max(),2):
+            if round_scaleless(zi, 2) == round_scaleless(z.max(), 2):
                 polar_norms_min.append([x[i],y[i], e_norms[i]])
-            # z=360nm (the z axis is inverted)
-            if zi == 0:
+            # z=360nm (the z axis is inverted) # changed from zi==0
+            if round_scaleless(zi, 2) == round_scaleless(z.min() ,2):
                 polar_norms_max.append([x[i], y[i], e_norms[i]])
         polar_norms_min = np.array(polar_norms_min).T
         polar_norms_max = np.array(polar_norms_max).T

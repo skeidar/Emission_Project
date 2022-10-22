@@ -8,6 +8,7 @@ from tqdm import tqdm
 from multiprocessing import Pool
 import plotly.express as px
 import pandas as pd
+from math import ceil, floor
 import time
 
 def complex_3d_norm(x,y,z):
@@ -340,17 +341,37 @@ def freq2energy(frequnecy):
     # energy in eV, frequency in Hz
     return frequnecy * cn.h / cn.e
 
+
 def energy2freq(energy):
     # energy in eV, frequency in Hz
     return cn.e * energy / cn.h
 
+
+def float_round(num, places = 0, direction = floor):
+    return direction(num * (10**places)) / float(10**places)
+
+
 def round_scaleless(num, order):
+    """
+    :param num:
+    :param order:
+    :return: the ceiling value of the number ORDER digits numbers after the point, excluding the exponent
+    """
+    flip = False
+    if num < 0:
+        flip = True
+        num = num * -1
     if 0 < abs(num) < 1:
-        return np.round(num, int(abs(np.log10(abs(num)))) + order)
-    elif num !=0:
-        return np.round(num, order)
+        exponent = int(abs(np.log10(abs(num)))) + order
+        ten_pow = (10 ** exponent)
+        return np.ceil(num * ten_pow) / ten_pow * ((-1) ** flip)
+    elif num != 0:
+        exponent = order
+        ten_pow = (10 ** exponent)
+        return np.ceil(num * ten_pow) / ten_pow * ((-1) ** flip)
     else:
         return 0
+
 
 
 def multi_run_wrapper(args):
@@ -369,63 +390,6 @@ def regular_grid_grads(vec, grid):
     return np.array(grad_list)
 
 def grad(scalar_field, points, axis):
-    """
-    delta = 2022  # a large arbitrary number, points scale is micrometer
-        grad_list = []
-        dist_set = set()
-        for i in range(len(points)):
-            dist = abs(points[0,axis] - points[i,axis])
-            dist_set.add(dist)
-            if delta > dist > 0:
-                delta = dist
-        print("working on axis {}".format(axis))
-        for i in tqdm(range(len(points))):
-            p = points[i,:]
-            closest_positive_idx = -1
-            closest_negative_idx = -1
-            adjacent_points_idx = -1
-            min_positive_dist = 2022
-            for j,c in enumerate(points):
-                if j == i:
-                    continue
-                if round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
-                    current_positive_dist = c[axis] - p[axis]
-                    if min_dist > current_positive_dist > 0:
-                        min_dist = current_positive_dist
-                        closest_positive_idx = j
-            if closest_positive_idx != -1:
-                grad_list.append((scalar_field[closest_positive_idx] - scalar_field[i]) / delta)
-            else:
-                #probably happens on boundarys
-                for j,c in enumerate(points):
-                    if j == i:
-                        continue
-                    if round_scaleless(c[(axis+1)%3],3) == round_scaleless(p[(axis+1)%3],3) and round_scaleless(c[(axis+2)%3],3) == round_scaleless(p[(axis+2)%3],3):
-                        closest_negative_idx = j
-                        break
-                if closest_negative_idx != -1:
-                    grad_list.append((scalar_field[i] - scalar_field[closest_negative_idx]) / delta)
-                # to add: what happens at the tips? there could be no points before and after
-                else:
-                    if axis == 2:
-                        continue
-                    else:
-                        for j, c in enumerate(points):
-                            if j == i:
-                                continue
-                            if round_scaleless(c[axis], 3) == round_scaleless(p[axis], 3) and (round_scaleless(
-                                    c[(axis + 1) % 2], 3) == round_scaleless(p[(axis + 1) % 2] - delta, 3)
-                                    or round_scaleless(c[(axis + 1) % 2], 3) == round_scaleless(
-                                    p[(axis + 1) % 2] + delta, 3)) and round_scaleless(c[2], 3) == round_scaleless(p[2], 3):
-                                adjacent_points_idx = j
-                                break
-                        if adjacent_points_idx != -1:
-                            grad_list.append(scalar_field[adjacent_points_idx])
-                        else:
-                            grad_list.append(float('nan'))
-        return grad_list
-
-    """
     delta = 2022  # a large arbitrary number, points scale is micrometer
     grad_list = []
     dist_set = set()
@@ -479,3 +443,222 @@ def grad(scalar_field, points, axis):
                         grad_list.append(float('nan'))
     return grad_list
 
+def flexible_comparison(a_orig,b_orig, error_order=0):
+    """
+    taking some error gap instead of regular '==' because of python's floating number errors
+    """
+    ten_power = 10 ** ((-1) * error_order)
+    a = round_scaleless(a_orig, error_order)
+    b = round_scaleless(b_orig, error_order)
+    return (a == b) or ((a + ten_power) == b or a == (b + ten_power))
+
+def flex_in(a_num,b_list, error_order=0):
+    """
+    taking some error gap instead of regular 'in' because of python's floating number errors
+    """
+    if 0 < abs(a_num) < 1:
+        exponent = (-1) * (int(abs(np.log10(abs(a_num)))) + error_order)
+        ten_power = (10 ** exponent)
+    else:
+        ten_power = 0
+    return (a_num in b_list) or ((a_num + ten_power) in b_list) or ((a_num - ten_power) in b_list)
+
+
+def plus_minus_error(a_num, b_list, error_order):
+    if 0 < abs(a_num) < 1:
+        exponent = (-1) * (int(abs(np.log10(abs(a_num)))) + error_order)
+        ten_power = (10 ** exponent)
+        print("FDASFDSAF", ten_power)
+    else:
+        return 0
+    if a_num in b_list:
+        return 0
+    elif (a_num + ten_power) in b_list:
+        return ten_power
+    elif (a_num - ten_power) in b_list:
+        return ten_power
+    else:
+        return float('Nan')
+
+def grad_express(scalar_field, points, axis):
+    # assuming regular grid
+    x, y, z = points.T
+    ROUNDNESS = 3
+    print(set(x))
+    xr, yr, zr = [list(map(lambda var: round_scaleless(round_scaleless(var, ROUNDNESS + 2), ROUNDNESS) , points.T[i, :])) for i in range(len(points.T[:, 0]))]
+    print(set(xr))
+    points_r = np.array([xr, yr, zr])
+    field_dict = create_func_dict(points_r.T, scalar_field.T)
+    coordinates = np.array([np.array(list(set(points_r[i, :]))) for i in range(3)])
+    plt.scatter(xr,yr)
+    #plt.show()
+    # find the delta
+    first_p = coordinates[axis][0]
+    #delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
+    delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
+    #delta2 = (coordinates[axis].max() - coordinates[axis].min()) / (len(coordinates[axis]) - 1)
+
+    grad_res = []
+    if axis == 0:
+        grad_res = grad_x_term(xr, yr, zr, delta, field_dict, ROUNDNESS)
+    elif axis == 1:
+        grad_res = grad_y_term(xr, yr, zr, delta, field_dict, ROUNDNESS)
+    elif axis == 2:
+        grad_res = grad_z_term(xr, yr, zr, delta, field_dict, ROUNDNESS)
+
+    print(len(x), len(grad_res))
+
+
+def grad_x_term(xr, yr, zr, delta, field_dict, roundness):
+    #roundness = roundness - 2
+    grad_res = []
+    what_counter = 0
+    rounded_xr = [round_scaleless(xr_element, roundness - 1) for xr_element in xr]
+    rounded_xr = xr
+    for i in range(len(xr)):
+        ximind = round_scaleless(xr[i] - delta, roundness)
+        ximaxd = round_scaleless(xr[i] + delta, roundness)
+        print(plus_minus_error(ximaxd, rounded_xr, roundness))
+       # if ximaxd in rounded_xr:
+        if flex_in(ximaxd, rounded_xr, roundness):
+            ximaxd = ximaxd + plus_minus_error(ximaxd, rounded_xr, roundness)
+            # Regular points
+            if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximaxd].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[ximaxd][yr[i]].keys()):
+                    grad_res.append([(field_dict[ximaxd][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
+                else:
+                    print("missed z+", xr[i], yr[i], zr[i])
+                    grad_res.append([float('Nan')])
+            # Eastern edges
+            #elif ximind in rounded_xr:
+            elif flex_in(ximind, rounded_xr, roundness):
+                ximind = ximind + plus_minus_error(ximind, rounded_xr, roundness)
+                if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximind].keys()):
+                    if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(
+                            field_dict[ximind][yr[i]].keys()):
+                        grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[ximind][yr[i]][zr[i]]) / delta])
+                    else:
+                        print("missed z+", xr[i], yr[i], zr[i])
+                        grad_res.append([float('Nan')])
+                # North/South poles
+                else:
+                    yri_plus = round_scaleless(yr[i] + delta, roundness)
+                    yri_minus = round_scaleless(yr[i] - delta, roundness)
+                    if yri_plus in list(field_dict[xr[i]].keys()):
+                        grad_res.append(
+                            [(field_dict[ximaxd][yri_plus][zr[i]] - field_dict[xr[i]][yri_plus][zr[i]]) / delta])
+                    elif yri_minus in list(field_dict[xr[i]].keys()):
+                        grad_res.append(
+                            [(field_dict[ximaxd][yri_minus][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
+                    else:
+                        print("missed y+", xr[i], yr[i], zr[i])
+                        grad_res.append([float('Nan')])
+            else:
+                what_counter+=1
+                print("XXXXX", xr[i], yr[i], ximind, ximaxd, set(xr))
+                break
+
+
+        # Most eastern point
+        #elif ximind in rounded_xr:
+        elif flex_in(ximind, rounded_xr, roundness):
+            ximind = ximind + plus_minus_error(ximind, rounded_xr, roundness)
+            if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximind].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[ximind][yr[i]].keys()):
+                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[ximind][yr[i]][zr[i]]) / delta])
+                else:
+                    print("missed z-", xr[i], yr[i], zr[i])
+                    grad_res.append([float('Nan')])
+            else:
+                print("missed y-", xr[i], yr[i], zr[i], "ADF", ximind,ximaxd, set(rounded_xr))
+                grad_res.append([float('Nan')])
+                break
+        else:
+            print("missed x", xr[i], yr[i], zr[i], "ADF", ximind ,ximaxd, set(rounded_xr))
+            grad_res.append([float('Nan')])
+            break
+    print('WHAT', what_counter)
+    return grad_res
+
+
+def grad_y_term(xr, yr, zr, delta, field_dict, roundness):
+    grad_res = []
+    for i in range(len(yr)):
+        yri_plus = round_scaleless(yr[i] + delta, roundness)
+        yri_minus = round_scaleless(yr[i] - delta, roundness)
+        if yri_plus in yr:
+            # Regular points
+            if yr[i] in list(field_dict[xr[i]].keys()) and yri_plus in list(field_dict[xr[i]].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_plus].keys()):
+                    grad_res.append([(field_dict[xr[i]][yri_plus][zr[i]] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
+                else:
+                    print("missed z+", xr[i], yr[i], zr[i])
+                    grad_res.append([float('Nan')])
+            # Southern edges
+            elif yri_minus in yr:
+                if yr[i] in list(field_dict[xr[i]].keys()) and yri_minus in list(field_dict[xr[i]].keys()):
+                    if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_minus].keys()):
+                        grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
+                    else:
+                        print("missed z+", xr[i], yr[i], zr[i])
+                        grad_res.append([float('Nan')])
+                # East/Western edges
+                else:
+                    xri_plus = round_scaleless(xr[i] + delta, roundness)
+                    xri_minus = round_scaleless(xr[i] - delta, roundness)
+                    if xri_plus in xr and yr[i] in list(field_dict[xri_plus].keys()) and yri_plus in list(field_dict[xri_plus].keys()):
+                        grad_res.append([(field_dict[xri_plus][yri_plus][zr[i]] - field_dict[xri_plus][yr[i]][zr[i]]) / delta])
+                    elif xri_minus in xr and yr[i] in list(field_dict[xri_minus].keys()) and yri_plus in list(field_dict[xri_minus].keys()):
+                        grad_res.append([(field_dict[xri_minus][yri_plus][zr[i]] - field_dict[xri_minus][yr[i]][zr[i]]) / delta])
+                    else:
+                        print("missed x+", xr[i], yr[i], zr[i])
+                        grad_res.append([float('Nan')])
+        # Most Southern point
+        elif yri_minus in yr:
+            if yr[i] in list(field_dict[xr[i]].keys()) and yri_minus in list(field_dict[xr[i]].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_minus].keys()):
+                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
+                else:
+                    print("missed z-", xr[i], yr[i], zr[i])
+                    grad_res.append([float('Nan')])
+            else:
+                print("missed x-", xr[i], yr[i], zr[i], list(field_dict[xr[i]].keys()))
+                grad_res.append([float('Nan')])
+        else:
+            print("missed y", xr[i], yr[i], zr[i])
+            grad_res.append([float('Nan')])
+    return grad_res
+
+
+def grad_z_term(xr, yr, zr, delta, field_dict, roundness):
+    grad_res = []
+    for i in range(len(zr)):
+        zri_plus = round_scaleless(zr[i] + delta, roundness)
+        zri_minus = round_scaleless(zr[i] - delta, roundness)
+        if zri_plus in zr:
+            # Regular points
+            if yr[i] in list(field_dict[xr[i]].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_plus in list(field_dict[xr[i]][yr[i]].keys()):
+                    grad_res.append([(field_dict[xr[i]][yr[i]][zri_plus] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
+                elif zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_minus in list(field_dict[xr[i]][yr[i]].keys()):
+                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zri_minus]) / delta])
+                else:
+                    print("missed z+", xr[i], yr[i], zr[i])
+                    #grad_res.append([float('Nan')])
+            else:
+                print("missed y+", xr[i], yr[i], zr[i])
+        elif zri_minus in zr:
+            if yr[i] in list(field_dict[xr[i]].keys()):
+                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_minus in list(field_dict[xr[i]][yr[i]].keys()):
+                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zri_minus]) / delta])
+                else:
+                    print("missed z-", xr[i], yr[i], zr[i])
+                    #grad_res.append([float('Nan')])
+            else:
+                print("missed y+", xr[i], yr[i], zr[i])
+                #grad_res.append([float('Nan')])
+        else:
+            print("missed z", xr[i], yr[i], zr[i])
+            #grad_res.append([float('Nan')])
+
+    return grad_res
