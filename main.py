@@ -42,7 +42,7 @@ if __name__ == "__main__":
     test = np.cos(NP * x * np.pi / (x.max() - x.min()))
     for i in range(3):
         #interp_f, grid = interp3d(points, field_k[:, i], 11)
-        interp_f, grid = interp3d(points, test, 33)
+        interp_f, grid = interp3d(points, test, 50)
         interp_field.append(interp_f)
     interp_field = np.array(interp_field)
     """
