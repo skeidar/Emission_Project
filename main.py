@@ -23,6 +23,8 @@ if __name__ == "__main__":
     E = load_modes(r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um")
 
 
+    Ek = E[0]
+    points = Ek.points
 
     div_test = np.load(r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\11_02_22_divergences\Ef_0.25eV_rad_2.2e-06um_f_3.81THz_RES_28_DIV.npy")
     my_grid = np.load(r"C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\11_02_22_divergences\Ef_0.25eV_rad_2.2e-06um_f_3.81THz_RES_28_grid.npy")
@@ -35,27 +37,31 @@ if __name__ == "__main__":
     Ek = E[0]
     points = Ek.points
     field_k = Ek.e_field
-
+    print(np.shape(points))
     interp_field = []
     x, y, z = points.T
     NP = 5
-    test = np.cos(NP * x * np.pi / (x.max() - x.min()))
+    test = np.cos(NP * y * np.pi / (y.max() - y.min())) * x
+
     for i in range(3):
-        #interp_f, grid = interp3d(points, field_k[:, i], 11)
-        interp_f, grid = interp3d(points, test, 50)
+        interp_f, grid = interp3d(points, field_k[:, i], 19)
+        #interp_f, grid = interp3d(points, test, 30)
         interp_field.append(interp_f)
     interp_field = np.array(interp_field)
-    """
+
     grad_list = regular_grid_grads(interp_field, grid)
     div = sum(grad_list)
     E[0].e_norms = np.real(div)
     E[0].points = grid
     E[0].Epolar_Ez_plot()
     """
-    grad_express(interp_field, grid, 0)
+    g = grad_express(interp_field, grid, 0)
+
+    generic_scatter_3d(grid, g, False)
 
 
     #E[0].points = my_grid
     #E[0].e_norms = np.real(div_test)
 
     #E[0].Epolar_Ez_plot()
+    """
