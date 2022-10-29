@@ -283,14 +283,21 @@ def create_cylinder_grid(x,y,z, resolution=None, super_res_z=False):
 
 
 
-def interp3d(points, V, resolution=None, super_res_z=False):
+def interp3d(points, V, resolution=None, super_res_z=False, ignore_nan=True):
     x = points[:, 0]
     y = points[:, 1]
     z = points[:, 2]
     grid = create_cylinder_grid(x, y, z, resolution, super_res_z)
     #grid[:,2] = grid[:,2] * 10
     print("Interpolating...")
-    Vi = griddata(points, V, grid, method='linear', fill_value=0, rescale=True)
+    if ignore_nan:
+        Vi = griddata(points, V, grid, method='linear', fill_value=0, rescale=True)
+    else:
+        Vi = griddata(points, V, grid, method='linear', fill_value=float('Nan'), rescale=True)
+        Vi_nearest = griddata(points, V, grid, method='nearest', fill_value=float('Nan'), rescale=True)
+        for i in range(len(Vi)):
+            if np.isnan(Vi[i]) and not np.isnan(Vi_nearest[i]):
+                Vi[i] = Vi_nearest[i]
     print("Done interpolating!")
     grid[:, 2] = grid[:, 2]
     return Vi, grid
@@ -486,12 +493,13 @@ def grad_express(scalar_field, points, axis):
     ROUNDNESS = 3
     xr, yr, zr = [list(map(lambda var: round_scaleless(round_scaleless(var, ROUNDNESS + 2), ROUNDNESS) , points.T[i, :])) for i in range(len(points.T[:, 0]))]
     points_r = np.array([xr, yr, zr])
-    field_dict = create_func_dict(points_r.T, scalar_field[axis,:])
+    #field_dict = create_func_dict(points_r.T, scalar_field[axis,:])
+    field_dict = create_func_dict(points_r.T, scalar_field)
     coordinates = np.array([np.array(list(set(points_r[i, :]))) for i in range(3)])
-    plt.scatter(xr,yr)
+    #plt.scatter(xr,yr)
     #plt.show()
     # find the delta
-    first_p = coordinates[axis][0]
+    #first_p = coordinates[axis][0]
     #delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
     #delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
     #delta2 = (coordinates[axis].max() - coordinates[axis].min()) / (len(coordinates[axis]) - 1)
@@ -502,165 +510,12 @@ def grad_express(scalar_field, points, axis):
         grad_res = grad_x_term(xr, yr, zr, field_dict)
     elif axis == 1:
         #grad_res = grad_y_term(xr, yr, zr, delta, field_dict, ROUNDNESS)
-        pass
+        grad_res = grad_y_term(xr, yr, zr, field_dict)
     elif axis == 2:
         #grad_res = grad_z_term(xr, yr, zr, delta, field_dict, ROUNDNESS)
-        pass
-    return grad_res
+        grad_res = grad_z_term(xr, yr, zr, field_dict)
+    return np.array(grad_res)
 
-def grad_x_term_OLD(xr, yr, zr, delta, field_dict, roundness):
-    #roundness = roundness - 2
-    grad_res = []
-    what_counter = 0
-    rounded_xr = [round_scaleless(xr_element, roundness - 1) for xr_element in xr]
-    rounded_xr = xr
-    for i in range(len(xr)):
-        ximind = round_scaleless(xr[i] - delta, roundness)
-        ximaxd = round_scaleless(xr[i] + delta, roundness)
-        print(plus_minus_error(ximaxd, rounded_xr, roundness))
-       # if ximaxd in rounded_xr:
-        if flex_in(ximaxd, rounded_xr, roundness):
-            ximaxd = ximaxd + plus_minus_error(ximaxd, rounded_xr, roundness)
-            # Regular points
-            if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximaxd].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[ximaxd][yr[i]].keys()):
-                    grad_res.append([(field_dict[ximaxd][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
-                else:
-                    print("missed z+", xr[i], yr[i], zr[i])
-                    grad_res.append([float('Nan')])
-            # Eastern edges
-            #elif ximind in rounded_xr:
-            elif flex_in(ximind, rounded_xr, roundness):
-                ximind = ximind + plus_minus_error(ximind, rounded_xr, roundness)
-                if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximind].keys()):
-                    if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(
-                            field_dict[ximind][yr[i]].keys()):
-                        grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[ximind][yr[i]][zr[i]]) / delta])
-                    else:
-                        print("missed z+", xr[i], yr[i], zr[i])
-                        grad_res.append([float('Nan')])
-                # North/South poles
-                else:
-                    yri_plus = round_scaleless(yr[i] + delta, roundness)
-                    yri_minus = round_scaleless(yr[i] - delta, roundness)
-                    if yri_plus in list(field_dict[xr[i]].keys()):
-                        grad_res.append(
-                            [(field_dict[ximaxd][yri_plus][zr[i]] - field_dict[xr[i]][yri_plus][zr[i]]) / delta])
-                    elif yri_minus in list(field_dict[xr[i]].keys()):
-                        grad_res.append(
-                            [(field_dict[ximaxd][yri_minus][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
-                    else:
-                        print("missed y+", xr[i], yr[i], zr[i])
-                        grad_res.append([float('Nan')])
-            else:
-                what_counter+=1
-                print("XXXXX", xr[i], yr[i], ximind, ximaxd, set(xr))
-                break
-
-
-        # Most eastern point
-        #elif ximind in rounded_xr:
-        elif flex_in(ximind, rounded_xr, roundness):
-            ximind = ximind + plus_minus_error(ximind, rounded_xr, roundness)
-            if yr[i] in list(field_dict[xr[i]].keys()) and yr[i] in list(field_dict[ximind].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[ximind][yr[i]].keys()):
-                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[ximind][yr[i]][zr[i]]) / delta])
-                else:
-                    print("missed z-", xr[i], yr[i], zr[i])
-                    grad_res.append([float('Nan')])
-            else:
-                print("missed y-", xr[i], yr[i], zr[i], "ADF", ximind,ximaxd, set(rounded_xr))
-                grad_res.append([float('Nan')])
-                break
-        else:
-            print("missed x", xr[i], yr[i], zr[i], "ADF", ximind ,ximaxd, set(rounded_xr))
-            grad_res.append([float('Nan')])
-            break
-    print('WHAT', what_counter)
-    return grad_res
-
-
-def grad_y_term_OLD(xr, yr, zr, delta, field_dict, roundness):
-    grad_res = []
-    for i in range(len(yr)):
-        yri_plus = round_scaleless(yr[i] + delta, roundness)
-        yri_minus = round_scaleless(yr[i] - delta, roundness)
-        if yri_plus in yr:
-            # Regular points
-            if yr[i] in list(field_dict[xr[i]].keys()) and yri_plus in list(field_dict[xr[i]].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_plus].keys()):
-                    grad_res.append([(field_dict[xr[i]][yri_plus][zr[i]] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
-                else:
-                    print("missed z+", xr[i], yr[i], zr[i])
-                    grad_res.append([float('Nan')])
-            # Southern edges
-            elif yri_minus in yr:
-                if yr[i] in list(field_dict[xr[i]].keys()) and yri_minus in list(field_dict[xr[i]].keys()):
-                    if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_minus].keys()):
-                        grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
-                    else:
-                        print("missed z+", xr[i], yr[i], zr[i])
-                        grad_res.append([float('Nan')])
-                # East/Western edges
-                else:
-                    xri_plus = round_scaleless(xr[i] + delta, roundness)
-                    xri_minus = round_scaleless(xr[i] - delta, roundness)
-                    if xri_plus in xr and yr[i] in list(field_dict[xri_plus].keys()) and yri_plus in list(field_dict[xri_plus].keys()):
-                        grad_res.append([(field_dict[xri_plus][yri_plus][zr[i]] - field_dict[xri_plus][yr[i]][zr[i]]) / delta])
-                    elif xri_minus in xr and yr[i] in list(field_dict[xri_minus].keys()) and yri_plus in list(field_dict[xri_minus].keys()):
-                        grad_res.append([(field_dict[xri_minus][yri_plus][zr[i]] - field_dict[xri_minus][yr[i]][zr[i]]) / delta])
-                    else:
-                        print("missed x+", xr[i], yr[i], zr[i])
-                        grad_res.append([float('Nan')])
-        # Most Southern point
-        elif yri_minus in yr:
-            if yr[i] in list(field_dict[xr[i]].keys()) and yri_minus in list(field_dict[xr[i]].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zr[i] in list(field_dict[xr[i]][yri_minus].keys()):
-                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yri_minus][zr[i]]) / delta])
-                else:
-                    print("missed z-", xr[i], yr[i], zr[i])
-                    grad_res.append([float('Nan')])
-            else:
-                print("missed x-", xr[i], yr[i], zr[i], list(field_dict[xr[i]].keys()))
-                grad_res.append([float('Nan')])
-        else:
-            print("missed y", xr[i], yr[i], zr[i])
-            grad_res.append([float('Nan')])
-    return grad_res
-
-
-def grad_z_term_OLD(xr, yr, zr, delta, field_dict, roundness):
-    grad_res = []
-    for i in range(len(zr)):
-        zri_plus = round_scaleless(zr[i] + delta, roundness)
-        zri_minus = round_scaleless(zr[i] - delta, roundness)
-        if zri_plus in zr:
-            # Regular points
-            if yr[i] in list(field_dict[xr[i]].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_plus in list(field_dict[xr[i]][yr[i]].keys()):
-                    grad_res.append([(field_dict[xr[i]][yr[i]][zri_plus] - field_dict[xr[i]][yr[i]][zr[i]]) / delta])
-                elif zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_minus in list(field_dict[xr[i]][yr[i]].keys()):
-                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zri_minus]) / delta])
-                else:
-                    print("missed z+", xr[i], yr[i], zr[i])
-                    #grad_res.append([float('Nan')])
-            else:
-                print("missed y+", xr[i], yr[i], zr[i])
-        elif zri_minus in zr:
-            if yr[i] in list(field_dict[xr[i]].keys()):
-                if zr[i] in list(field_dict[xr[i]][yr[i]].keys()) and zri_minus in list(field_dict[xr[i]][yr[i]].keys()):
-                    grad_res.append([(field_dict[xr[i]][yr[i]][zr[i]] - field_dict[xr[i]][yr[i]][zri_minus]) / delta])
-                else:
-                    print("missed z-", xr[i], yr[i], zr[i])
-                    #grad_res.append([float('Nan')])
-            else:
-                print("missed y+", xr[i], yr[i], zr[i])
-                #grad_res.append([float('Nan')])
-        else:
-            print("missed z", xr[i], yr[i], zr[i])
-            #grad_res.append([float('Nan')])
-
-    return grad_res
 
 
 def next_element_dict(l):
@@ -796,23 +651,23 @@ def grad_y_term(x, y, z, f_dict):
     # same with y
     # for y
     #   if y in next y keys (i.e has next y)
-    #       if y in f[next_y]
-    #           if z in f[next_x][y]
-    #               add (f[next_x][y][z] - f[x][y][z]) / (next_x - x)
+    #       if next_y in f[x]
+    #           if z in f[x][y_next]
+    #               add (f[x][next_y][z] - f[x][y][z]) / (next_y - y)
     #           else WRONG DATA
-    #       elif prev_x in x's and y in f[prev_x]
+    #       elif prev_y in y's and prev_y in f[x]
     #           if z in f[prev_x][y]
-    #               add (f[x][y][z] - f[prev_x][y][z]) / (prev_x - x)
+    #               add (f[x][y][z] - f[x][prev_y][z]) / (prev_y - y)
     #           else WRONG Z DATA
     #       else
-    #           if next_y in f[next_x] and next_y in f[x]
-    #               add (f[next_x][next_y][z] - f[x][next_y][z]) / (next_x - x)
-    #           elif prev_y in f[next_x] and prev_y in f[x]
-    #               add (f[next_x][prev_y][z] - f[x][prev_y][z]) / (next_x - x)
-    #   elif prev_x in x's
-    #       if y in f[prev_x]
-    #           if z in f[prev_x][y]
-    #               add (f[x][y][z] - f[prev_x][y][z]) / (x - prev_x)
+    #           if next_y in f[next_x] and y in f[next_x]
+    #               add (f[next_x][next_y][z] - f[next_x][y][z]) / (next_y - y)
+    #           elif next_y in f[prev_x] and next_y in f[x]
+    #               add (f[prev_x][next_y][z] - f[prev_y][_y][z]) / (next_y -y)
+    #   elif prev_y in y's
+    #       if prev_y in f[x]
+    #           if z in f[x][prev_y]
+    #               add (f[x][y][z] - f[x][prev_y][z]) / (y - prev_y)
     #           else WRONG Z DATA
     #       else WRONG Y DATA
     #   else WRONG X DATA
@@ -821,77 +676,142 @@ def grad_y_term(x, y, z, f_dict):
     next_y_dict = next_element_dict(y)
     prev_y_dict = prev_element_dict(y)
     grad_res = []
-    for i in range(len(x)):
-        # not the MOST eastern point
-        if x[i] in next_x_dict.keys():
-            next_x = next_x_dict[x[i]]
-            # not on the eastern edge
-            if y[i] in f_dict[next_x].keys():
-                if z[i] in f_dict[next_x][y[i]].keys():
-                    grad_res.append((f_dict[next_x][y[i]][z[i]] - f_dict[x[i]][y[i]][z[i]]) / (next_x - x[i]))
+    for i in range(len(y)):
+        # not the MOST northern point
+        if y[i] in next_y_dict.keys():
+            next_y = next_y_dict[y[i]]
+            # not on the northern edge
+            if next_y in f_dict[x[i]].keys():
+                if z[i] in f_dict[x[i]][next_y].keys():
+                    grad_res.append((f_dict[x[i]][next_y][z[i]] - f_dict[x[i]][y[i]][z[i]]) / (next_y - y[i]))
                 else:
                     grad_res.append(float('Nan'))
-                    print("--- warning: WRONG Z DATA -x01")
-            # eastern edge
-            # not on the MOST western point
-            elif x[i] in prev_x_dict.keys():
-                prev_x = prev_x_dict[x[i]]
-                #print(prev_x, x[i], y[i])
-                # not on the MOST northern or southern point
-                if y[i] in f_dict[prev_x].keys():
-                    if z[i] in f_dict[prev_x][y[i]].keys():
-                        grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[prev_x][y[i]][z[i]]) / (x[i] - prev_x))
+                    print("--- warning: WRONG Z DATA -y01")
+            # northern edge
+            # not on the MOST southern point
+            elif y[i] in prev_y_dict.keys():
+                prev_y = prev_y_dict[y[i]]
+                # not on the MOST eastern or western point
+                if prev_y in f_dict[x[i]].keys():
+                    if z[i] in f_dict[x[i]][prev_y].keys():
+                        grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[x[i]][prev_y][z[i]]) / (y[i] - prev_y))
                     else:
                         grad_res.append(float('Nan'))
-                        print("--- warning: WRONG Z DATA -x02")
+                        print("--- warning: WRONG Z DATA -y02")
                 else:
-                    # not on the northern edge
-                    if y[i] in next_y_dict.keys():
-                        next_y = next_y_dict[y[i]]
-                        if next_y in f_dict[x[i]].keys() and next_y in f_dict[next_x].keys(): # not on the northern edge
+                    # not on the eastern edge
+                    if x[i] in next_x_dict.keys():
+                        next_x = next_x_dict[x[i]]
+                        if y[i] in f_dict[next_x].keys() and y[i] in f_dict[next_x].keys(): # not on the eastern edge
                             if z[i] in f_dict[next_x][next_y].keys():
-                                grad_res.append((f_dict[next_x][next_y][z[i]] - f_dict[x[i]][next_y][z[i]]) / (next_x - x[i]))
+                                grad_res.append((f_dict[next_x][next_y][z[i]] - f_dict[next_x][y[i]][z[i]]) / (next_y - y[i]))
                             else:
                                 grad_res.append(float('Nan'))
-                                print("--- warning: WRONG Z DATA -x03")
-                        elif y[i] in prev_y_dict.keys():
-                            prev_y = prev_y_dict[y[i]]
-                            if prev_y in f_dict[x[i]].keys() and prev_y in f_dict[next_x].keys(): # not on the southern edge
-                                if z[i] in f_dict[next_x][prev_y].keys():
-                                    grad_res.append((f_dict[next_x][prev_y][z[i]] - f_dict[x[i]][prev_y][z[i]]) / (next_x - x[i]))
+                                print("--- warning: WRONG Z DATA -y03")
+                        elif x[i] in prev_x_dict.keys():
+                            prev_x = prev_x_dict[x[i]]
+                            if y[i] in f_dict[prev_x].keys() and next_y in f_dict[prev_x].keys(): # not on the western edge
+                                if z[i] in f_dict[prev_x][next_y].keys():
+                                    grad_res.append((f_dict[prev_x][next_y][z[i]] - f_dict[prev_x][y[i]][z[i]]) / (next_y - y[i]))
                             else:
                                 grad_res.append(float('Nan'))
-                                print("--- warning: WRONG Z DATA -x04")
+                                print("--- warning: WRONG Z DATA -y04")
                         else:
                             grad_res.append(float('Nan'))
-                            print("--- warning: WRONG Y DATA -x01")
-                    elif y[i] in prev_y_dict.keys():
-                        prev_y = prev_y_dict[y[i]]
-                        if prev_y in f_dict[x[i]].keys() and prev_y in f_dict[next_x].keys():  # not on the southern edge
-                            if z[i] in f_dict[next_x][prev_y].keys():
+                            print("--- warning: WRONG Y DATA -y01")
+                    elif x[i] in prev_x_dict.keys():
+                        prev_x = prev_x_dict[x[i]]
+                        if y[i] in f_dict[prev_x].keys() and next_y in f_dict[prev_x].keys():  # not on the southern edge
+                            if z[i] in f_dict[prev_x][next_y].keys():
                                 grad_res.append(
-                                    (f_dict[next_x][prev_y][z[i]] - f_dict[x[i]][prev_y][z[i]]) / (next_x - x[i]))
+                                    (f_dict[prev_x][next_y][z[i]] - f_dict[prev_x][y[i]][z[i]]) / (next_y - y[i]))
                         else:
                             grad_res.append(float('Nan'))
-                            print("--- warning: WRONG Z DATA -x06")
+                            print("--- warning: WRONG Z DATA -y06")
                     else:
                         grad_res.append(float('Nan'))
-                        print("--- warning: WRONG Y DATA -x03")
+                        print("--- warning: WRONG Y DATA -y03")
             else:
                 grad_res.append(float('Nan'))
-                print("--- warning: WRONG X DATA -x01")
-        elif x[i] in prev_x_dict.keys():
-            prev_x = prev_x_dict[x[i]]
-            if y[i] in f_dict[prev_x].keys():
-                if z[i] in f_dict[prev_x][y[i]].keys():
-                    grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[prev_x][y[i]][z[i]]) / (x[i] - prev_x))
+                print("--- warning: WRONG X DATA -y01")
+        elif y[i] in prev_y_dict.keys():
+            prev_y = prev_y_dict[y[i]]
+            if prev_y in f_dict[x[i]].keys():
+                if z[i] in f_dict[x[i]][prev_y].keys():
+                    grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[x[i]][prev_y][z[i]]) / (y[i] - prev_y))
                 else:
                     grad_res.append(float('Nan'))
-                    print("--- warning: WRONG Z DATA -x05")
+                    print("--- warning: WRONG Z DATA -y05")
             else:
                 grad_res.append(float('Nan'))
-                print("--- warning: WRONG Y DATA -x02")
+                print("--- warning: WRONG Y DATA -y02")
         else:
             grad_res.append(float('Nan'))
-            print("--- warning: WRONG X DATA -x02")
+            print("--- warning: WRONG X DATA -y02")
     return grad_res
+
+
+def grad_z_term(x, y, z, f_dict):
+    # generate a "next z" list that keeps the index of the next element
+    # generate a "prev z" list that keeps the index of the previous element
+    # same with y
+    # for z
+    #   if z in next z keys (i.e has next z)
+    #       if next_z in f[x][y]
+    #               add (f[x][y][next_z] - f[x][y][z]) / (next_z - z)
+    #           else WRONG DATA
+    #       elif prev_z in z's and prev_z in f[x][y]
+    #               add (f[x][y][z] - f[x][y][prev_z]) / (z - z_prev)
+    #           else WRONG Z DATA
+    #   elif prev_z in z's
+    #       if prev_z in f[x][y]
+    #               add (f[x][y][z] - f[x][y][prev_z]) / (z - prev_z)
+    #           else WRONG Z DATA
+    #       else WRONG Y DATA
+    #   else WRONG X DATA
+    next_z_dict = next_element_dict(z)
+    prev_z_dict = prev_element_dict(z)
+    grad_res = []
+    for i in range(len(z)):
+        if z[i] in next_z_dict.keys():
+            next_z = next_z_dict[z[i]]
+            # not on the northern edge
+            if next_z in f_dict[x[i]][y[i]].keys():
+                grad_res.append((f_dict[x[i]][y[i]][next_z] - f_dict[x[i]][y[i]][z[i]]) / (next_z - z[i]))
+            elif z[i] in prev_z_dict.keys():
+                prev_z = prev_z_dict[z[i]]
+                if prev_z in f_dict[x[i]][y[i]].keys():
+                    grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[x[i]][y[i]][prev_z]) / (z[i] - prev_z))
+                else:
+                    grad_res.append(float('Nan'))
+                    print("--- warning: WRONG Z DATA -z01")
+        elif z[i] in prev_z_dict.keys():
+            prev_z = prev_z_dict[z[i]]
+            if prev_z in f_dict[x[i]][y[i]].keys():
+                grad_res.append((f_dict[x[i]][y[i]][z[i]] - f_dict[x[i]][y[i]][prev_z]) / (z[i] - prev_z))
+            else:
+                grad_res.append(float('Nan'))
+                print("--- warning: WRONG Z DATA -z03")
+        else:
+            grad_res.append(float('Nan'))
+            print("--- warning: WRONG X DATA -z02")
+    return grad_res
+
+
+def regular_grid_div(vec, grid):
+    if np.shape(vec.T) == np.shape(grid):
+        vec = vec.T
+    grads = np.array([grad_express(vec[:, ax], grid, ax) for ax in range(3)])
+    div_res = sum(grads)
+    return np.array(div_res)
+
+
+def regular_grid_curl(vec, grid):
+    if np.shape(vec.T) == np.shape(grid):
+        vec = vec.T
+    Fx = vec[:, 0]
+    Fy = vec[:, 1]
+    Fz = vec[:, 2]
+    curl_res = np.array([grad_express(Fz, grid, 1) - grad_express(Fy, grid, 2), grad_express(Fx, grid, 2) - grad_express(Fz, grid, 0), grad_express(Fy, grid, 0) - grad_express(Fx, grid, 1)])
+    return curl_res
+

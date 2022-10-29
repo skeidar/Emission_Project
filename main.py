@@ -35,33 +35,51 @@ if __name__ == "__main__":
 
     #generic_scattr_3d(my_grid, np.imag(div_test), False)
     Ek = E[0]
-    points = Ek.points
+    points = Ek.points * 1e6
     field_k = Ek.e_field
     print(np.shape(points))
     interp_field = []
+    interp_field2 = []
     x, y, z = points.T
-    NP = 5
-    test = np.cos(NP * y * np.pi / (y.max() - y.min())) * x
+    NP = 10
+    #test = np.cos(NP * z * np.pi / (z.max() - z.min()))
+    test = np.array([3 * x, x, 2 * x * z])
+    test = test
+    #test = np.exp(1j * y * np.pi * NP / (y.max() - y.min()))
+
 
     for i in range(3):
-        interp_f, grid = interp3d(points, field_k[:, i], 19)
-        #interp_f, grid = interp3d(points, test, 30)
+        #interp_f, grid = interp3d(points, field_k[:, i], 19)
+        interp_f, grid = interp3d(points, test[i,:], 55, ignore_nan=False)
         interp_field.append(interp_f)
-    interp_field = np.array(interp_field)
 
+    interp_field = np.array(interp_field)
+    #interp_field2 = np.array(interp_field2)
+    """
     grad_list = regular_grid_grads(interp_field, grid)
     div = sum(grad_list)
     E[0].e_norms = np.real(div)
     E[0].points = grid
     E[0].Epolar_Ez_plot()
     """
-    g = grad_express(interp_field, grid, 0)
 
-    generic_scatter_3d(grid, g, False)
+    #d = regular_grid_div(interp_field, grid)
+    #c = regular_grid_curl(interp_field, grid)
+
+    #control = 3 * grid[:,0] + 3 * np.ones(np.shape(grid[:,0]))
+    #generic_scatter_3d(grid, control, False)
+    #generic_scatter_3d(grid, regular_grid_div(c, grid), False)
+
+    #g2 = np.array(grad_express(interp_field2, grid, 0))
+    #generic_scatter_3d(points, test, False)
+    generic_scatter_3d(grid, interp_field[0], False)
+    generic_scatter_3d(grid, interp_field[1], False)
+    generic_scatter_3d(grid, interp_field[2], False)
+
 
 
     #E[0].points = my_grid
     #E[0].e_norms = np.real(div_test)
 
     #E[0].Epolar_Ez_plot()
-    """
+    #"""
