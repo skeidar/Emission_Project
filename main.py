@@ -1,4 +1,5 @@
 from field_parsing import *
+from playground import *
 from wavefunc import load_wavefunction, normalize_wv
 from matplotlib import pyplot as plt
 
@@ -35,22 +36,22 @@ if __name__ == "__main__":
 
     #generic_scattr_3d(my_grid, np.imag(div_test), False)
     Ek = E[0]
-    points = Ek.points * 1e6
+    points = Ek.points
     field_k = Ek.e_field
     print(np.shape(points))
     interp_field = []
     interp_field2 = []
     x, y, z = points.T
     NP = 10
-    #test = np.cos(NP * z * np.pi / (z.max() - z.min()))
-    test = np.array([3 * x, x, 2 * x * z])
-    test = test
+    test = np.array([np.sin(NP * y * np.pi / (x.max() - x.min())), np.sin(NP * z * np.pi / (z.max() - z.min())) * np.sin(NP * y * np.pi / (y.max() - y.min())), np.sin(NP * z * np.pi / (z.max() - z.min())) * np.sin(NP * y * np.pi / (y.max() - y.min()))])
+    #test = np.array([3 * x, x, 2 * x * z])
+
     #test = np.exp(1j * y * np.pi * NP / (y.max() - y.min()))
 
 
     for i in range(3):
         #interp_f, grid = interp3d(points, field_k[:, i], 19)
-        interp_f, grid = interp3d(points, test[i,:], 55, ignore_nan=False)
+        interp_f, grid = interp3d(points, test[i,:], 3, ignore_nan=False)
         interp_field.append(interp_f)
 
     interp_field = np.array(interp_field)
@@ -62,19 +63,26 @@ if __name__ == "__main__":
     E[0].points = grid
     E[0].Epolar_Ez_plot()
     """
-
-    #d = regular_grid_div(interp_field, grid)
+    xg, yg, zg = grid.T
+    o = np.array([np.zeros(np.shape(xg)), NP * np.pi / (yg.max() - yg.min()) * np.sin(NP * zg * np.pi / (zg.max() - zg.min())) * np.cos(NP * yg * np.pi / (yg.max() - yg.min())), NP * np.pi / (zg.max() - zg.min()) * np.cos(NP * zg * np.pi / (zg.max() - zg.min())) * np.sin(NP * yg * np.pi / (yg.max() - yg.min()))])
+    d = regular_grid_div(interp_field, grid)
     #c = regular_grid_curl(interp_field, grid)
+
+    compare_Gamma_k_methods(E[0], wv_path)
+
+
+
+
+
 
     #control = 3 * grid[:,0] + 3 * np.ones(np.shape(grid[:,0]))
     #generic_scatter_3d(grid, control, False)
-    #generic_scatter_3d(grid, regular_grid_div(c, grid), False)
+    #div_curl = regular_grid_div(c, grid)
+    #generic_scatter_3d(grid[~np.isnan(div_curl)], div_curl[~np.isnan(div_curl)], False)
 
     #g2 = np.array(grad_express(interp_field2, grid, 0))
     #generic_scatter_3d(points, test, False)
-    generic_scatter_3d(grid, interp_field[0], False)
-    generic_scatter_3d(grid, interp_field[1], False)
-    generic_scatter_3d(grid, interp_field[2], False)
+
 
 
 

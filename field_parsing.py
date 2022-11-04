@@ -42,10 +42,11 @@ class ElectricMode(object):
 
 
     def compute_norm(self):
+        self.use_disperssion(0)
         return irregular_integration_delaunay_3d(self.points, (self.e_norms) ** 2)
 
     def naive_normalize(self):
-        self.e_field = self.e_field / (self.compute_norm()) ** 0.5
+        self.e_field = self.e_field / (self.compute_norm() / self.active_eps_r) ** 0.5
         self.e_norms = np.real([complex_3d_norm(e[0], e[1], e[2]) for e in self.e_field])
 
     def use_disperssion(self, energy):
@@ -53,7 +54,7 @@ class ElectricMode(object):
         mode_energy = cn.physical_constants['Planck constant in eV/Hz'][0] * self.frequency
         bulk_dispersion = self._eps['bulk_eps']
         active_dispersion = self._eps['total_eps']
-        energy = self._eps['omega']
+        energy = self._eps['omega'] # why there is energy as input?
         omega = energy / cn.physical_constants['reduced Planck constant in eV s'][0]
         bulk_interp = interpolate.interp1d(energy, bulk_dispersion)
         active_interp = interpolate.interp1d(energy, active_dispersion)
@@ -63,7 +64,7 @@ class ElectricMode(object):
         self.active_eps_r = active_eps_r
 
         dw = omega[1] - omega[0]
-        bulk_eps_derivative = np.gradient(omega * np.sqrt(np.real(bulk_dispersion))) / dw
+        bulk_eps_derivative = np.gradient(omega * np.sqrt(np.real(bulk_dispersion))) / dw # why did I use dw? - beacuse Martin did, and its better that way
         active_eps_derivative = np.gradient(omega * np.sqrt(np.real(active_dispersion))) / dw
 
         d_bulk_interp = interpolate.interp1d(energy, bulk_eps_derivative)
@@ -662,19 +663,20 @@ def dipole_locations(z_linspace):
 
         # sum * 12 is larger than the device's z-length
         TOTAL_LAYERS = LAYER1 + LAYER2 + LAYER3 + LAYER4 + LAYER5 + dipole_width
-        dipole_layer_offset = z_linspace.max() - (LAYER1 + LAYER2 + LAYER3)
+        #dipole_layer_offset = z_linspace.max() - (LAYER1 + LAYER2 + LAYER3)
+        dipole_layer_offset = (LAYER1 + LAYER2 + LAYER3)
         d = np.zeros(np.shape(z_linspace))
 
         count = int(round((z_linspace.max() - z_linspace.min()) / (TOTAL_LAYERS)))
         for k in range(count):
             # assuming the graphene is at z=0.36um, we know where layer1 begins
             # so the layer stacking starts from there
-            for i,zi in enumerate(z_linspace[::-1]):
-                dipole_begin = dipole_layer_offset - TOTAL_LAYERS * k
-                dipole_end = dipole_begin - dipole_width
-                if zi < dipole_begin and zi > dipole_end:
+            for i,zi in enumerate(z_linspace):
+                dipole_begin = dipole_layer_offset + TOTAL_LAYERS * k
+                dipole_end = dipole_begin + dipole_width
+                if zi >= dipole_begin and zi < dipole_end:
                     d[i] = 1
-        d = d[::-1]
+        #d = d[::-1]
         return d
 
 
@@ -691,9 +693,16 @@ def generate_dipole_density(d, z_linspace, points):
 
 def generate_dipole_along_z(d, z_linspace):
     # the dipole normalized density isn't affected by the dipole strength
-
-    dipole_density = d / (regular_integration_1d(d, z_linspace))
+    dipole_density = d / abs((z_linspace.max() - z_linspace.min()))
     return dipole_density
+
+def average_over_dipoles(func, dipoles, z):
+    if len(func) != len(dipoles) or len(func) != len(z):
+        raise ValueError("Incorrect sizes")
+    averaged = iregular_integration_1d(func * dipoles, z) / abs(z.max() - z.min())
+    return averaged
+
+
 
 def spontaneous_emission(d, f, disp=True):
     hbar = cn.hbar #1.0545711818e-34
@@ -718,8 +727,8 @@ def Gamma_m(u, d, Q, f, f_m, eps_r=None):
     return res
 
 def Gamma_k(u, d, Q, f, f_k, eps_r=None):
-    hbar = cn.hbar #1.0545711818e-34
-    eps_0 = cn.epsilon_0 #8.85418781762039e-12
+    hbar = cn.hbar #1.0545711818e-34 [J * s] = [kg * m^2 / s]
+    eps_0 = cn.epsilon_0 #8.85418781762039e-12 [F / m] =  [s^4 * A^2 / (kg * m^3)]
     if eps_r is None:
         eps_r = np.real(disspersion(freq2energy(f_k))[1])
     w = 2 * np.pi * f
@@ -727,7 +736,65 @@ def Gamma_k(u, d, Q, f, f_k, eps_r=None):
     res = ((abs(d) ** 2) * (abs(u) ** 2) * 4 * Q * w_k * w_k) / ((hbar * eps_0 * (eps_r ** 2) * np.pi) * (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2))
     return res
 
-def Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=None):
+def Gamma_k_q(u_z_q_dict, div_u_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=None):
+    e = cn.e
+    m = cn.m_e * 0.067
+    hbar = cn.hbar
+    eps_0 = cn.epsilon_0
+    if eps_r is None:
+        eps_r = np.real(disspersion(freq2energy(f_k))[1])
+    w = 2 * np.pi * f
+    w_k = 2 * np.pi * f_k
+
+    u_prod = u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv)
+    zeros_term = np.zeros(np.shape(u_prod))  # div_term_product(u_z_interp, psi_i, psi_f, z_wv)
+    div_prod = div_term_product(div_u_dict, points_q, psi_i, psi_f, z_wv)
+
+    res_zero = np.empty(np.shape(u_prod), dtype='complex_')
+    res_zero[:, :2] = u_prod[:, :2] # XY coordiantes are the same
+    abs_sqrd_term_zero = np.abs(u_prod[:, 2] + zeros_term[:, 2]) ** 2
+
+    res_div = np.empty(np.shape(u_prod), dtype='complex_')
+    res_div[:, :2] = u_prod[:, :2] # XY coordiantes are the same
+    abs_sqrd_term_div = np.abs(u_prod[:, 2] + div_prod[:, 2]) ** 2
+
+    res_zero[:, 2] = ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (
+                Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * abs_sqrd_term_zero
+    res_div[:, 2] = ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (
+                Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * abs_sqrd_term_div
+    return np.real(res_zero), np.real(res_div)
+
+def u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
+    psi_term = np.conj(psi_f) * np.gradient(psi_i, z_wv)
+    x, y, z = points_q.T
+    xy_terms = []
+    xy_set = set()
+    for xi, yi in zip(x, y):
+        xy_set.add((xi, yi))
+    for xi, yi in tqdm(xy_set, total=len(xy_set)):
+        xy_func = np.array([u_z_q_dict[xi][yi][zi] for zi in z])
+        u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        interp_field = u_z_interp(z_wv)
+        xy_terms.append([xi, yi, regular_integration_1d(2 * psi_term * interp_field, z_wv)])
+    return np.array(xy_terms)
+
+
+def div_term_product(div_u_dict, points_q, psi_i, psi_f, z_wv):
+    x, y, z = points_q.T
+    xy_terms = []
+    xy_set = set()
+    psi_term = np.conj(psi_f) * psi_i
+    for xi, yi in zip(x, y):
+        xy_set.add((xi, yi))
+    for xi, yi in tqdm(xy_set, total=len(xy_set)):
+        xy_func = np.array([div_u_dict[xi][yi][zi] for zi in z])
+        div_u_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
+        interp_div = div_u_interp(z_wv)
+        xy_terms.append([xi, yi, regular_integration_1d(psi_term * interp_div, z_wv)])
+    return np.array(xy_terms)
+
+
+def OLD_Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=None):
     e = cn.e
     m = cn.m_e * 0.067
     hbar = cn.hbar
@@ -744,28 +811,21 @@ def Gamma_k_q(u_z_q_dict, points_q, psi_i, psi_f, z_wv, Q, f, f_k, area, eps_r=N
     avg_abs_sqrd_term_zero = average_sum_of_prods(u_prod, zeros_term, area)
     avg_abs_sqrd_term_div = average_sum_of_prods(u_prod, div_prod, area)
     res_zero = ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term_zero
-    res_div =  ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term_div
+    res_div = ((hbar * e ** 2) / (2 * m ** 2 * eps_0 * eps_r ** 2)) * (Q / (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2)) * avg_abs_sqrd_term_div
     return res_zero, res_div
 
 
-def u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
+def OLD_u_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
     func = np.conj(psi_f) * np.gradient(psi_i, z_wv)
     return non_avg_inner_product_calculation_over_reg_grid(points_q, u_z_q_dict, z_wv, func)
 
-def div_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
+def OLD_div_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
     z = points_q[:, 2]
     xy_terms = []
     xy_set = set()
     func = np.conj(psi_f) * psi_i
     for x, y in zip(points_q[:, 0], points_q[:, 1]):
         xy_set.add((x,y))
-    """ #2
-    for x,y in tqdm(xy_set, total=len(xy_set)):
-        xy_func = np.array([u_z_q_dict[x][y][zi] for zi in z])
-        u_z_interp = interpolate.interp1d(z, xy_func, kind='linear', bounds_error=False, fill_value=0)
-        interp_field = np.gradient(u_z_interp(z_wv), z_wv)
-        xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_wv)])
-    """
     for x,y in tqdm(xy_set, total=len(xy_set)):
         xy_func = np.array([u_z_q_dict[x][y][zi] for zi in z])
         print(len(xy_func), len(z))
@@ -773,6 +833,8 @@ def div_term_product(u_z_q_dict, points_q, psi_i, psi_f, z_wv):
         interp_field = np.gradient(u_z_interp(z_wv), z_wv)
         xy_terms.append([x, y, regular_integration_1d(func * interp_field, z_wv)])
     return np.array(xy_terms)
+
+
 
 def average_sum_of_prods(prod1, prod2, area):
     ## assuming [[xi, yi, prod],...]
@@ -2143,7 +2205,7 @@ def generate_slow_varying_fields(wavelength):
     return E, E_interp
 
 
-def compare_Gamma_k_methods(wv_path, wavelength):
+def OLD_compare_Gamma_k_methods(wv_path, wavelength):
     E, E_interp = generate_slow_varying_fields(wavelength)
     #E.normalize(freq2energy(E.frequency)) #5
     #E_interp.normalize(freq2energy(E_interp.frequency))
@@ -2210,4 +2272,106 @@ def compare_Gamma_k_methods(wv_path, wavelength):
         print("col Gamma1/Gamma2 * 2/pi =    {}".format((total_gamma_k_q_coloumb / G_k) * (2 / np.pi)))
         return total_gamma_k_q_coloumb * (2 / np.pi), total_gamma_k_q_div * (2 / np.pi), G_k
         #plt.show()
+
+
+def compare_Gamma_k_methods(Ek, wv_path):
+    RESOLUTION = 25
+    Ek.normalize(freq2energy(Ek.frequency))
+    u_x, grid = interp3d(Ek.points, Ek.e_field[:, 0], RESOLUTION, ignore_nan=False)
+    u_y, _ = interp3d(Ek.points, Ek.e_field[:, 1], RESOLUTION, ignore_nan=False)
+    u_z, _ = interp3d(Ek.points, Ek.e_field[:, 2], RESOLUTION, ignore_nan=False)
+    u_z = u_z[::-1]
+    u_k = np.array([u_x, u_y, u_z])
+    print("--- generating divergence")
+    div_u_k = regular_grid_div(np.conjugate(u_k), grid)
+
+    x, y, z = grid.T
+    z_linspace = np.linspace(z.min(), round_micro_meter(z.max(), 4), 100000)
+    wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
+    z_wv = z_wv * 1e-9
+    nQW = 12
+
+    bandplot[:, 0] = bandplot[:, 0] * 1e-9
+    init_states = [2]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+
+    periods = range(nQW)
+    PER_LEN = 30.68e-9
+    zper = int(len(z_linspace) / nQW)
+    MILI_TO_EV = 1000
+    band_energy_diff = (levelstot[0] - levelstot[7]) * MILI_TO_EV
+
+    interp_bandplot = np.zeros(np.shape(z_linspace))
+
+    u_z_dict = create_func_dict(grid, u_z)
+    div_u_dict = create_func_dict(grid, div_u_k)
+    print("--- iterating over init states")
+
+    for INIT_STATE in init_states:
+        psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
+        psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+        d = cn.e * regular_integration_1d(psi_i * z_wv * psi_f, z_wv)
+        energy_i = levelstot[INIT_STATE]
+        energy_f = levelstot[FINAL_STATE]
+        delta_energy = abs(energy_i - energy_f)
+        f_ij = energy2freq(delta_energy)
+
+        # dipole approximation averaged Gamma_k(z)
+        gamma_k_result = Gamma_k(u=u_z, d=d, Q=Ek.Q, f=f_ij, f_k=Ek.frequency, eps_r=None)
+        averaged_gamma_k = averaging_over_area(grid, Ek.disk_area, z_linspace, gamma_k_result)
+        avg_G_k = averaged_gamma_k * dipole_locations(z_linspace)
+
+        total_q_rate = np.empty((nQW, len(z_linspace)), dtype='complex_')
+        total_q_div_rate = np.empty((nQW, len(z_linspace)), dtype='complex_')
+        for per in periods:
+            print("Init: {},    Period: {}".format(INIT_STATE, per))
+            z_wv_q = z_wv + per * PER_LEN
+            qw_z = z_linspace[per * zper : (per + 1) * zper]
+
+            gamma_res = Gamma_k_q(u_z_dict, div_u_dict, grid, psi_i, psi_f, z_wv_q, Ek.Q, f_ij, Ek.frequency, Ek.disk_area, eps_r=None)
+            avg_G_k_q = irregular_integration_delaunay_2d(gamma_res[0]) / Ek.disk_area
+            avg_G_k_q_with_div = irregular_integration_delaunay_2d(gamma_res[1]) / Ek.disk_area
+            z_linspace_slice = (z_linspace <= qw_z.max()) & (z_linspace >= qw_z.min())
+            avg_G_k_q_slice = z_linspace_slice * avg_G_k_q * dipole_locations(z_linspace)
+            total_q_rate[per, :] = avg_G_k_q_slice
+            avg_G_k_q_with_div_slice = z_linspace_slice * avg_G_k_q_with_div * dipole_locations(z_linspace)
+            total_q_div_rate[per, :] = avg_G_k_q_with_div_slice
+            interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + PER_LEN * per,
+                                                        bandplot[:, 1] - band_energy_diff * per,
+                                                        kind='linear',
+                                                        fill_value=0, bounds_error=False)
+            interp_bandplot[per * zper : (per + 1) * zper] = (interp_bandplot_func(qw_z))
+
+
+        #plt.figure()
+        total_k_rate = np.sum(total_q_rate, axis=0)
+        total_k_div_rate = np.sum(total_q_div_rate, axis=0)
+        backward_z = z_linspace[::-1] * 1e9
+        spont_emission = spontaneous_emission(d, f_ij)
+        interp_bandplot = interp_bandplot - min(interp_bandplot)
+        print("Calculated Fp", np.round(average_over_dipoles(avg_G_k, dipole_locations(z_linspace), z_linspace) / spont_emission, 2))
+        theory_purcell = (3 / (4 * np.pi ** 2) * ((cn.c / Ek.frequency) / np.sqrt(np.real(Ek.active_eps_r))) ** 3 * Ek.Q / (Ek.disk_area * (z.max() - z.min())))
+        print("Non-approx Fp", average_over_dipoles(total_k_div_rate, dipole_locations(z_linspace), z_linspace) / spont_emission)
+        print("Theory Fp", theory_purcell)
+        w_k = 2 * np.pi * Ek.frequency
+        w_if = 2 * np.pi * f_ij
+        rho_if = 2 * Ek.Q / np.pi * w_k / ((2 * Ek.Q * (w_if - w_k)) ** 2 + w_k ** 2)
+        rho_resonance = 2 * Ek.Q / np.pi * w_k / (w_k ** 2)
+        print("--- Estimation",theory_purcell / rho_resonance * rho_if * 3 / 30.68)
+        print("------- Rho ratio", rho_if / rho_resonance)
+        #plt.plot(backward_z, np.real(total_k_rate) / spont_emission, backward_z, np.real(total_k_div_rate) / spont_emission, backward_z, np.real(avg_G_k) / spont_emission)
+        plt.plot(z_linspace * 1e9, np.real(total_k_rate) / spont_emission, z_linspace * 1e9,
+                 np.real(total_k_div_rate) / spont_emission, z_linspace * 1e9, np.real(avg_G_k) / spont_emission)
+        plt.plot(z_linspace * 1e9, averaged_gamma_k / spont_emission, '--r', linewidth=0.8)
+        #plt.ylabel(r'$\Gamma_k$ [sec$^-$$^1$]')
+        plt.ylabel(r'$F_p$ enhancement [1]')
+        plt.xlabel('z [nm]')
+        plt.plot(z_linspace[:-10] *1e9, interp_bandplot[:-10] / abs(max(interp_bandplot[:-10])) * max(np.real(total_k_rate) /spont_emission ) / 0.95 , 'k--', linewidth=0.3)
+        plt.legend(['Coloumn gauge', 'With DIV', 'Dipole approx. QW', 'Dipole approx. interpolated', 'Energy band [a.u]'])
+        plt.show()
+
+
+
+
+
 

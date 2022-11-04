@@ -129,6 +129,10 @@ def regular_integration_1d(samples, z):
     result = sum([samples[i] * delta for i in range(len(samples) -1)]) # -1?
     return result
 
+def iregular_integration_1d(samples, z):
+    result = sum([samples[i] * (z[i+1] - z[i]) for i in range(len(samples) -1)]) # -1?
+    return result
+
 def interp1d_complex_function(original_range, func, new_range , kind='linear', bounds_error=True, fill_value=0):
     reals = np.real(func)
     imags = np.imag(func)
@@ -298,8 +302,9 @@ def interp3d(points, V, resolution=None, super_res_z=False, ignore_nan=True):
         for i in range(len(Vi)):
             if np.isnan(Vi[i]) and not np.isnan(Vi_nearest[i]):
                 Vi[i] = Vi_nearest[i]
+        #grid = grid[~np.isnan(Vi)]
+        #Vi = Vi[~np.isnan(Vi)]
     print("Done interpolating!")
-    grid[:, 2] = grid[:, 2]
     return Vi, grid
 
 def maximise_duplicates(points, func):
@@ -815,3 +820,14 @@ def regular_grid_curl(vec, grid):
     curl_res = np.array([grad_express(Fz, grid, 1) - grad_express(Fy, grid, 2), grad_express(Fx, grid, 2) - grad_express(Fz, grid, 0), grad_express(Fy, grid, 0) - grad_express(Fx, grid, 1)])
     return curl_res
 
+def interpolation_SNR_score(original_f, interpolated_f, points):
+    if np.shape(interpolated_f) != np.shape(points[:,0]):
+        raise ValueError("Grid size is", np.shape(points), "interp size is", np.shape(interpolated_f))
+    elif np.shape(original_f) != np.shape(points[:,0]):
+        raise ValueError("Grid size is", np.shape(points), "original size is", np.shape(original_f))
+    else:
+        signal_energy = cyclinder_grid_3d_integration(points, original_f * original_f)
+        delta_f = interpolated_f - original_f
+        noise_energy = cyclinder_grid_3d_integration(points, delta_f * delta_f)
+        SNR =  10 * np.log10(signal_energy / noise_energy)
+        return SNR
