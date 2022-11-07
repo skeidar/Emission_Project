@@ -36,58 +36,15 @@ if __name__ == "__main__":
 
     #generic_scattr_3d(my_grid, np.imag(div_test), False)
     Ek = E[0]
-    points = Ek.points
+    points = Ek.points.T
     field_k = Ek.e_field
-    print(np.shape(points))
-    interp_field = []
-    interp_field2 = []
-    x, y, z = points.T
-    NP = 10
-    test = np.array([np.sin(NP * y * np.pi / (x.max() - x.min())), np.sin(NP * z * np.pi / (z.max() - z.min())) * np.sin(NP * y * np.pi / (y.max() - y.min())), np.sin(NP * z * np.pi / (z.max() - z.min())) * np.sin(NP * y * np.pi / (y.max() - y.min()))])
-    #test = np.array([3 * x, x, 2 * x * z])
-
-    #test = np.exp(1j * y * np.pi * NP / (y.max() - y.min()))
 
 
-    for i in range(3):
-        #interp_f, grid = interp3d(points, field_k[:, i], 19)
-        interp_f, grid = interp3d(points, test[i,:], 3, ignore_nan=False)
-        interp_field.append(interp_f)
+    folder_path = r'C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\071122_gamma_compare'
+    #compare_Gamma_k_methods(Ek, wv_path, plz_plot=True)
+    print_purcell_per_set(folder_path, ef=0.25, rad=2.2, fix_fp=True)
+    plot_total_set(folder_path, ef=0.25, rad=2.2)
 
-    interp_field = np.array(interp_field)
-    #interp_field2 = np.array(interp_field2)
-    """
-    grad_list = regular_grid_grads(interp_field, grid)
-    div = sum(grad_list)
-    E[0].e_norms = np.real(div)
-    E[0].points = grid
-    E[0].Epolar_Ez_plot()
-    """
-    xg, yg, zg = grid.T
-    o = np.array([np.zeros(np.shape(xg)), NP * np.pi / (yg.max() - yg.min()) * np.sin(NP * zg * np.pi / (zg.max() - zg.min())) * np.cos(NP * yg * np.pi / (yg.max() - yg.min())), NP * np.pi / (zg.max() - zg.min()) * np.cos(NP * zg * np.pi / (zg.max() - zg.min())) * np.sin(NP * yg * np.pi / (yg.max() - yg.min()))])
-    d = regular_grid_div(interp_field, grid)
-    #c = regular_grid_curl(interp_field, grid)
+    #plot_specific_compared_set(folder_path, ef=0.25, rad=2.2)
 
-    compare_Gamma_k_methods(E[0], wv_path)
-
-
-
-
-
-
-    #control = 3 * grid[:,0] + 3 * np.ones(np.shape(grid[:,0]))
-    #generic_scatter_3d(grid, control, False)
-    #div_curl = regular_grid_div(c, grid)
-    #generic_scatter_3d(grid[~np.isnan(div_curl)], div_curl[~np.isnan(div_curl)], False)
-
-    #g2 = np.array(grad_express(interp_field2, grid, 0))
-    #generic_scatter_3d(points, test, False)
-
-
-
-
-    #E[0].points = my_grid
-    #E[0].e_norms = np.real(div_test)
-
-    #E[0].Epolar_Ez_plot()
-    #"""
+    #check_spatial_frequency(E[0])

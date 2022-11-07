@@ -693,7 +693,7 @@ def generate_dipole_density(d, z_linspace, points):
 
 def generate_dipole_along_z(d, z_linspace):
     # the dipole normalized density isn't affected by the dipole strength
-    dipole_density = d / abs((z_linspace.max() - z_linspace.min()))
+    dipole_density = d / regular_integration_1d(d, z_linspace)
     return dipole_density
 
 def average_over_dipoles(func, dipoles, z):
@@ -701,7 +701,6 @@ def average_over_dipoles(func, dipoles, z):
         raise ValueError("Incorrect sizes")
     averaged = iregular_integration_1d(func * dipoles, z) / abs(z.max() - z.min())
     return averaged
-
 
 
 def spontaneous_emission(d, f, disp=True):
@@ -2274,15 +2273,15 @@ def OLD_compare_Gamma_k_methods(wv_path, wavelength):
         #plt.show()
 
 
-def compare_Gamma_k_methods(Ek, wv_path):
-    RESOLUTION = 25
+def compare_Gamma_k_methods(Ek, wv_path, plz_plot=False):
+    RESOLUTION = 33
     Ek.normalize(freq2energy(Ek.frequency))
     u_x, grid = interp3d(Ek.points, Ek.e_field[:, 0], RESOLUTION, ignore_nan=False)
     u_y, _ = interp3d(Ek.points, Ek.e_field[:, 1], RESOLUTION, ignore_nan=False)
     u_z, _ = interp3d(Ek.points, Ek.e_field[:, 2], RESOLUTION, ignore_nan=False)
     u_z = u_z[::-1]
     u_k = np.array([u_x, u_y, u_z])
-    print("--- generating divergence")
+    #print("--- generating divergence")
     div_u_k = regular_grid_div(np.conjugate(u_k), grid)
 
     x, y, z = grid.T
@@ -2292,7 +2291,7 @@ def compare_Gamma_k_methods(Ek, wv_path):
     nQW = 12
 
     bandplot[:, 0] = bandplot[:, 0] * 1e-9
-    init_states = [2]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
     FINAL_STATE = 0  # state 7
 
     periods = range(nQW)
@@ -2305,8 +2304,8 @@ def compare_Gamma_k_methods(Ek, wv_path):
 
     u_z_dict = create_func_dict(grid, u_z)
     div_u_dict = create_func_dict(grid, div_u_k)
-    print("--- iterating over init states")
-
+    #print("--- iterating over init states")
+    dicts_return_list = []
     for INIT_STATE in init_states:
         psi_i = wavetot[:, INIT_STATE] * np.sqrt(1e9)
         psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
@@ -2315,11 +2314,11 @@ def compare_Gamma_k_methods(Ek, wv_path):
         energy_f = levelstot[FINAL_STATE]
         delta_energy = abs(energy_i - energy_f)
         f_ij = energy2freq(delta_energy)
-
         # dipole approximation averaged Gamma_k(z)
         gamma_k_result = Gamma_k(u=u_z, d=d, Q=Ek.Q, f=f_ij, f_k=Ek.frequency, eps_r=None)
         averaged_gamma_k = averaging_over_area(grid, Ek.disk_area, z_linspace, gamma_k_result)
         avg_G_k = averaged_gamma_k * dipole_locations(z_linspace)
+        #avg_G_k = averaged_gamma_k * generate_dipole_along_z(dipole_locations(z_linspace), z_linspace)
 
         total_q_rate = np.empty((nQW, len(z_linspace)), dtype='complex_')
         total_q_div_rate = np.empty((nQW, len(z_linspace)), dtype='complex_')
@@ -2333,42 +2332,64 @@ def compare_Gamma_k_methods(Ek, wv_path):
             avg_G_k_q_with_div = irregular_integration_delaunay_2d(gamma_res[1]) / Ek.disk_area
             z_linspace_slice = (z_linspace <= qw_z.max()) & (z_linspace >= qw_z.min())
             avg_G_k_q_slice = z_linspace_slice * avg_G_k_q * dipole_locations(z_linspace)
+            #avg_G_k_q_slice = z_linspace_slice * avg_G_k_q * generate_dipole_along_z(dipole_locations(z_linspace), z_linspace)
             total_q_rate[per, :] = avg_G_k_q_slice
             avg_G_k_q_with_div_slice = z_linspace_slice * avg_G_k_q_with_div * dipole_locations(z_linspace)
+            #avg_G_k_q_with_div_slice = z_linspace_slice * avg_G_k_q_with_div * generate_dipole_along_z(dipole_locations(z_linspace), z_linspace)
             total_q_div_rate[per, :] = avg_G_k_q_with_div_slice
             interp_bandplot_func = interpolate.interp1d(bandplot[:, 0] + PER_LEN * per,
                                                         bandplot[:, 1] - band_energy_diff * per,
                                                         kind='linear',
                                                         fill_value=0, bounds_error=False)
             interp_bandplot[per * zper : (per + 1) * zper] = (interp_bandplot_func(qw_z))
-
-
-        #plt.figure()
-        total_k_rate = np.sum(total_q_rate, axis=0)
-        total_k_div_rate = np.sum(total_q_div_rate, axis=0)
-        backward_z = z_linspace[::-1] * 1e9
+        total_k_rate = np.sum(total_q_rate, axis=0) # equivalent to integration, so we need to normalize
+        total_k_div_rate = np.sum(total_q_div_rate, axis=0) # equivalent to integration, so we need to normalize
         spont_emission = spontaneous_emission(d, f_ij)
         interp_bandplot = interp_bandplot - min(interp_bandplot)
-        print("Calculated Fp", np.round(average_over_dipoles(avg_G_k, dipole_locations(z_linspace), z_linspace) / spont_emission, 2))
-        theory_purcell = (3 / (4 * np.pi ** 2) * ((cn.c / Ek.frequency) / np.sqrt(np.real(Ek.active_eps_r))) ** 3 * Ek.Q / (Ek.disk_area * (z.max() - z.min())))
-        print("Non-approx Fp", average_over_dipoles(total_k_div_rate, dipole_locations(z_linspace), z_linspace) / spont_emission)
+        d_normalization = regular_integration_1d(dipole_locations(z_linspace), z_linspace)
+        avg_G_k_Yz = avg_G_k / d_normalization
+        total_k_div_rate_Yz = total_k_div_rate / d_normalization
+        #print("Calculated Fp", np.round(average_over_dipoles(avg_G_k, dipole_locations(z_linspace), z_linspace) / spont_emission, 2))
+        #print("Calculated Fp", np.round(regular_integration_1d(avg_G_k, z_linspace) / spont_emission, 2))
+        # print("Non-approx Fp", average_over_dipoles(total_k_div_rate, dipole_locations(z_linspace), z_linspace) / spont_emission)
+
+        #theory_purcell = np.round((3 / (4 * np.pi ** 2) * ((cn.c / Ek.frequency) / np.sqrt(np.real(Ek.active_eps_r))) ** 3 * Ek.Q / (Ek.disk_area * (z.max() - z.min()))) , 2)
+        theory_purcell = np.round((3 / (4 * np.pi ** 2) * (
+                    (cn.c / f_ij) / np.sqrt(np.real(disspersion(freq2energy(f_ij))[1]))) ** 3 * Ek.Q / (
+                                               Ek.disk_area * (z.max() - z.min()))), 2)
+        Gk_dipole_Fp = np.round(regular_integration_1d(avg_G_k_Yz, z_linspace) / spont_emission, 2)
+        Gk_divergence_Fp = np.round(np.real(regular_integration_1d(total_k_div_rate_Yz, z_linspace) / spont_emission), 2)
+        print("Calculated Fp", Gk_dipole_Fp)
+        print("Non-approx Fp", Gk_divergence_Fp)
         print("Theory Fp", theory_purcell)
+
         w_k = 2 * np.pi * Ek.frequency
         w_if = 2 * np.pi * f_ij
         rho_if = 2 * Ek.Q / np.pi * w_k / ((2 * Ek.Q * (w_if - w_k)) ** 2 + w_k ** 2)
         rho_resonance = 2 * Ek.Q / np.pi * w_k / (w_k ** 2)
-        print("--- Estimation",theory_purcell / rho_resonance * rho_if * 3 / 30.68)
-        print("------- Rho ratio", rho_if / rho_resonance)
-        #plt.plot(backward_z, np.real(total_k_rate) / spont_emission, backward_z, np.real(total_k_div_rate) / spont_emission, backward_z, np.real(avg_G_k) / spont_emission)
-        plt.plot(z_linspace * 1e9, np.real(total_k_rate) / spont_emission, z_linspace * 1e9,
-                 np.real(total_k_div_rate) / spont_emission, z_linspace * 1e9, np.real(avg_G_k) / spont_emission)
-        plt.plot(z_linspace * 1e9, averaged_gamma_k / spont_emission, '--r', linewidth=0.8)
-        #plt.ylabel(r'$\Gamma_k$ [sec$^-$$^1$]')
-        plt.ylabel(r'$F_p$ enhancement [1]')
-        plt.xlabel('z [nm]')
-        plt.plot(z_linspace[:-10] *1e9, interp_bandplot[:-10] / abs(max(interp_bandplot[:-10])) * max(np.real(total_k_rate) /spont_emission ) / 0.95 , 'k--', linewidth=0.3)
-        plt.legend(['Coloumn gauge', 'With DIV', 'Dipole approx. QW', 'Dipole approx. interpolated', 'Energy band [a.u]'])
-        plt.show()
+        rho_ratio = rho_if / rho_resonance
+        Fp_estimation = np.round(theory_purcell * rho_ratio, 2)
+        #print("--- Estimation",theory_purcell / rho_resonance * rho_if * 3 / 30.68)
+        print("--- Estimation", Fp_estimation)
+        print("------- Rho ratio", rho_ratio)
+        if plz_plot:
+            plt.plot(z_linspace * 1e9, np.real(total_k_rate) / spont_emission, z_linspace * 1e9,
+                     np.real(total_k_div_rate) / spont_emission, z_linspace * 1e9, np.real(avg_G_k) / spont_emission)
+            plt.plot(z_linspace * 1e9, averaged_gamma_k / spont_emission, '--r', linewidth=0.8)
+            #plt.ylabel(r'$\Gamma_k$ [sec$^-$$^1$]')
+            plt.ylabel(r'$F_p$ enhancement [1]')
+            plt.xlabel('z [nm]')
+            plt.plot(z_linspace[:-10] *1e9, interp_bandplot[:-10] / abs(max(interp_bandplot[:-10])) * max(np.real(total_k_rate) /spont_emission ) / 0.95 , 'k--', linewidth=0.3)
+            plt.legend(['Coloumn gauge', 'With DIV', 'Dipole approx. QW', 'Dipole approx. interpolated', 'Energy band [a.u]'])
+            plt.show()
+
+        return_dict = {'dipole': INIT_STATE, 'f_k': Ek.frequency, 'Ef': Ek.ef, 'radius': Ek.radius, 'resolution': RESOLUTION,'Gk_dipole_Fp': Gk_dipole_Fp,
+                       'Gk_divergence_Fp': Gk_divergence_Fp, 'theory_purcell': theory_purcell,
+                       'Fp_estimation': Fp_estimation, 'spont_emission': spont_emission, 'avg_G_k': avg_G_k, 'averaged_gamma_k': averaged_gamma_k,
+                       'total_k_div_rate': total_k_div_rate, 'total_k_rate': total_k_rate, 'z_linspace': z_linspace, 'interp_bandplot': interp_bandplot, 'd': d, 'f_ij': f_ij}
+        dicts_return_list.append(return_dict)
+
+    return dicts_return_list
 
 
 

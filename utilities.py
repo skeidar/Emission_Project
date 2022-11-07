@@ -1,3 +1,4 @@
+
 import numpy as np
 import scipy.spatial as ssp
 from scipy import interpolate
@@ -10,6 +11,8 @@ import plotly.express as px
 import pandas as pd
 from math import ceil, floor
 import time
+from six.moves import cPickle as pickle #for performance
+
 
 def complex_3d_norm(x,y,z):
     return np.sqrt(np.dot((x,y,z), np.conj((x,y,z))))
@@ -823,7 +826,7 @@ def regular_grid_curl(vec, grid):
 def interpolation_SNR_score(original_f, interpolated_f, points):
     if np.shape(interpolated_f) != np.shape(points[:,0]):
         raise ValueError("Grid size is", np.shape(points), "interp size is", np.shape(interpolated_f))
-    elif np.shape(original_f) != np.shape(points[:,0]):
+    elif np.shape(original_f) != np.shape(points[:, 0]):
         raise ValueError("Grid size is", np.shape(points), "original size is", np.shape(original_f))
     else:
         signal_energy = cyclinder_grid_3d_integration(points, original_f * original_f)
@@ -831,3 +834,13 @@ def interpolation_SNR_score(original_f, interpolated_f, points):
         noise_energy = cyclinder_grid_3d_integration(points, delta_f * delta_f)
         SNR =  10 * np.log10(signal_energy / noise_energy)
         return SNR
+
+
+def save_dict(di_, filename_):
+    with open(filename_, 'wb') as f:
+        pickle.dump(di_, f)
+
+def load_dict(filename_):
+    with open(filename_, 'rb') as f:
+        ret_di = pickle.load(f)
+    return ret_di
