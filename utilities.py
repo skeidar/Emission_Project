@@ -387,7 +387,13 @@ def round_scaleless(num, order):
     else:
         return 0
 
-
+def round_num(num, order):
+    if 0 < abs(num) < 1:
+        return np.round(num, int(abs(np.log10(abs(num)))) + order)
+    elif num !=0:
+        return np.round(num, order)
+    else:
+        return 0
 
 def multi_run_wrapper(args):
     return grad(*args)
@@ -504,13 +510,6 @@ def grad_express(scalar_field, points, axis):
     #field_dict = create_func_dict(points_r.T, scalar_field[axis,:])
     field_dict = create_func_dict(points_r.T, scalar_field)
     coordinates = np.array([np.array(list(set(points_r[i, :]))) for i in range(3)])
-    #plt.scatter(xr,yr)
-    #plt.show()
-    # find the delta
-    #first_p = coordinates[axis][0]
-    #delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
-    #delta = round_scaleless(min([abs(first_p - val) for val in coordinates[axis] if abs(first_p - val) != 0]), ROUNDNESS)
-    #delta2 = (coordinates[axis].max() - coordinates[axis].min()) / (len(coordinates[axis]) - 1)
 
     grad_res = []
     if axis == 0:

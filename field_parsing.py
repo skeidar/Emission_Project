@@ -203,6 +203,27 @@ class ElectricMode(object):
             plt.ylabel(r"z [m]")
         plt.show()
 
+    def return_polar(self):
+        e_norms = self.e_norms
+        x, y, z = self.points.T
+        # finding the polar image in z values
+        polar_norms_max = []
+
+        for i, zi in enumerate(z):
+            # z=360nm (the z axis is inverted) # changed from zi==0
+            if round_num(zi, 2) == round_num(z.min(), 2):
+                polar_norms_max.append([x[i], y[i], e_norms[i]])
+        polar_norms_max = np.array(polar_norms_max).T
+        x_norms, y_norms, norms_func_max = polar_norms_max
+
+        # create x-y points to be used in heatmap
+        xa = np.linspace(x_norms.min(), x_norms.max(), 1000)
+        ya = np.linspace(y_norms.min(), y_norms.max(), 1000)
+
+        # Interpolate for plotting
+        zg_max = griddata((x_norms, y_norms), norms_func_max, (xa[None, :], ya[:, None]), method='cubic')
+        return xa, ya, zg_max
+
     def Epolar_plot(self, fig=None):
         """
         assuming the field is E(z)*E(r,theta)
@@ -213,13 +234,13 @@ class ElectricMode(object):
         # finding the polar image in z values
         polar_norms_min = []
         polar_norms_max = []
-        print(z.max(), round_scaleless(z.max(),2))
+
         for i, zi in enumerate(z):
             # z=0 (the z axis is inverted)
-            if round_scaleless(zi, 2) == round_scaleless(z.max(), 2):
+            if round_num(zi, 2) == round_num(z.max(), 2):
                 polar_norms_min.append([x[i],y[i], e_norms[i]])
             # z=360nm (the z axis is inverted) # changed from zi==0
-            if round_scaleless(zi, 2) == round_scaleless(z.min() ,2):
+            if round_num(zi, 2) == round_num(z.min(), 2):
                 polar_norms_max.append([x[i], y[i], e_norms[i]])
         polar_norms_min = np.array(polar_norms_min).T
         polar_norms_max = np.array(polar_norms_max).T
@@ -285,6 +306,16 @@ class ElectricMode(object):
             ax3.set_ylabel('Mean |E(z)|')
             ax3.set_title('Mean magnitude |E(z)|')
         return fig
+
+    def return_z_field(self):
+        e_norms = self.e_norms
+        x, y, z = self.points.T
+        # finding the polar image in z values
+
+        zi = np.linspace(z.min(), round_micro_meter(z.max(), 4), 1000)
+        Ez_interp_res = averaging_over_area(self.points, self.disk_area, zi, e_norms)
+        return zi, Ez_interp_res
+
     def Epolar_Ez_plot(self):
         fig = plt.figure()
         fig = self.Epolar_plot(fig)

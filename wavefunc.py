@@ -334,8 +334,10 @@ if __name__ == "__main__":
             psi_f = wavetot[:,i]
             psi_i = wavetot[:,j]
             dip = regular_integration_1d(psi_i * psi_f * z_wv,z_wv)
-            if 2.7 <= dip <= 3:
-                print(dip, i, j)
+            if 2.7 <= dip <= 3.4:
+                print(dip, i, j, levelstot[j] - levelstot[i], energy2freq(levelstot[j] - levelstot[i]) / 1e12)
+                plt.plot(z_wv, abs(psi_f) ** 2 + levelstot[i], z_wv, abs(psi_i) ** 2 + levelstot[j])
+    #plt.show()
     #testing_shifts_APL()
 
 

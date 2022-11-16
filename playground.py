@@ -195,6 +195,48 @@ def plot_specific_compared_set(folder_path, ef, rad):
                 z_linspace = mode_dipole['z_linspace']
             plot_comparison(mode_dipole, z_linspace)
 
+def plot_every_set(folder_path):
+
+    fig_uls, axs_uls = plt.subplots(3, 3)
+    fig_inj, axs_inj = plt.subplots(3, 3)
+    axs = [axs_uls, axs_inj]
+    fig = [fig_uls, fig_inj]
+    rads = ['2.2', '2.6', '3']
+    efs = ['0.25', '0.2', '0.15']
+    ax_counter = 0
+    for ef in efs:
+        for rad in rads:
+            if ef=='0.15' and rad=='2.6':
+                for axi in axs:
+                    axi[int(ax_counter / 3), ax_counter % 3].set_visible(False)
+                ax_counter += 1
+            else:
+                z_linspace, spont_emission, total_k_rate_list, total_k_div_rate_list, avg_G_k_list, f_k_list, dip, _, _, interp_bandplot = extract_emission_set(folder_path, ef, rad)
+                z_nm = z_linspace * 1e9
+                k_rate = np.sum(np.real(total_k_rate_list), 1)
+                k_div_rate = np.sum(np.real(total_k_div_rate_list), 1)
+                Gk_rate = np.sum(np.array(avg_G_k_list), 1)
+                for i, dipole in enumerate(dip):
+                    axs[i][int(ax_counter / 3), ax_counter % 3].plot(z_nm, k_div_rate[i] / spont_emission[i], z_nm, k_rate[i] / spont_emission[i], z_nm,
+                             Gk_rate[i] / spont_emission[i])
+                    interp_bandplot = interp_bandplot - min(
+                        interp_bandplot)  # should have happend begore saving, bu the plots are wrong without it
+                    axs[i][int(ax_counter / 3), ax_counter % 3].plot(z_nm[:-10], interp_bandplot[:-10] / abs(max(interp_bandplot[:-10])) * max(
+                        np.real(k_rate[i]) / spont_emission[i]) / 0.95, 'k--', linewidth=0.3)
+                    plt.sca(axs[i][int(ax_counter / 3), ax_counter % 3])
+                    plt.title(r'$E_f$={}eV, radius={}$\mu$m, {}->LLS'.format(ef, rad, dipole), fontsize=9)
+                    plt.xlabel('z [nm]', fontsize=9)
+                    plt.ylabel('Active region $F_p$ [1]', fontsize=9)
+                    plt.yticks(fontsize=9)
+                    plt.xticks(fontsize=9)
+                    #fig[i].suptitle('Emission enhancement {}'.format(dip[i]))
+                    #plt.legend([r'With $\nabla$$\cdot$A', 'Coulomb gauge', 'Dipole approx.', 'Energy band [a.u.]'])
+                    fig[i].legend([r'With $\nabla$$\cdot$A', 'Coulomb gauge', 'Dipole approx.', 'Energy band [a.u.]'],
+                                  loc='lower center', ncol=4, fontsize=9, bbox_transform=fig[i].transFigure)
+                    #fig[i].tight_layout()
+                ax_counter += 1
+
+    plt.show()
 
 def plot_comparison(mode_dipole, z_linspace=None):
     if 'z_linspace' not in mode_dipole.keys() and z_linspace is None:
@@ -210,18 +252,36 @@ def plot_comparison(mode_dipole, z_linspace=None):
         rad = mode_dipole['radius']
         f_k = np.round(float(mode_dipole['f_k']) / 1e12, 2)
         dip = (mode_dipole['dipole'] == 2) * 'ULS' + (mode_dipole['dipole'] == 1) * 'INJ'
-        plt.plot(z_nm, np.real(total_k_rate) / spont_emission, z_nm,
-                 np.real(total_k_div_rate) / spont_emission, z_nm, np.real(avg_G_k) / spont_emission)
+        plt.plot(z_nm, np.real(total_k_div_rate) / spont_emission, z_nm,
+                 np.real(total_k_rate) / spont_emission, z_nm, np.real(avg_G_k) / spont_emission)
         plt.ylabel(r'$F_p$ enhancement [1]')
         plt.xlabel('z [nm]')
         plt.title('$F_p$ over active regions; Ef={}eV, rad={}, $f_k$={}THz, {}'.format(ef, rad, f_k, dip))
         interp_bandplot = interp_bandplot - min(interp_bandplot) # should have happend begore saving, bu the plots are wrong without it
         plt.plot(z_nm[:-10], interp_bandplot[:-10] / abs(max(interp_bandplot[:-10])) * max(np.real(total_k_rate) / spont_emission) / 0.95, 'k--', linewidth=0.3)
         plt.legend(
-            ['Coloumn gauge', 'With DIV', 'Dipole approx.', 'Energy band [a.u]'])
+            ['With DIV', 'Coloumn gauge',  'Dipole approx.', 'Energy band [a.u]'])
         plt.show()
 
-    return
+def print_every_purcell(folder_path, fix_fp=False):
+    rads = ['2.2', '2.6', '3']
+    efs = ['0.25', '0.2', '0.15']
+    for ef in efs:
+        for rad in rads:
+            if ef == '0.15' and rad == '2.6':
+                continue
+            else:
+                spont_emission, theory_purcell_list, estimated_fp_list, f_k_list, dip, _, _ = extract_purcells_set(folder_path, ef, rad, fix_fp)
+                G_rate_fp, div_rate_fp = get_purcell_of_emission(folder_path, ef, rad)
+                theory_purcell = np.sum(np.real(theory_purcell_list), 1)
+                estimated_fp = np.sum(np.real(estimated_fp_list), 1)
+                for i, dipole in enumerate(dip):
+                    print("--- Device = Ef={}eV, Radius={}m, dipole={}->LLS".format(ef, rad, dipole))
+                    print("     --- Theory Purcell factor = {}".format(np.round(theory_purcell[i], 2)))
+                    print("     --- Estimated Purcell factor = {}".format(np.round(estimated_fp[i], 2)))
+                    print("     --- Fp for dipole approximation = {}".format(np.round(G_rate_fp[i], 2)))
+                    print("     --- Fp for full expression = {}".format(np.round(div_rate_fp[i], 2)))
+
 
 def print_purcell_per_set(folder_path, ef, rad, fix_fp=False):
     spont_emission, theory_purcell_list, estimated_fp_list, f_k_list, dip, ef, rad = extract_purcells_set(folder_path, ef, rad, fix_fp)
@@ -267,7 +327,8 @@ def plot_total_set(folder_path, ef, rad):
         plt.xlabel('z [nm]')
         plt.ylabel('Active region $F_p$ [1]')
         plt.legend([r'With $\nabla$$\cdot$A', 'Coulomb gauge', 'Dipole approx.', 'Energy band [a.u.]'])
-    plt.show()
+    return z_nm, k_rate, k_div_rate, Gk_rate, interp_bandplot
+
 
 def extract_emission_set(folder_path, ef, rad):
     mode_dicts = load_specific_compared_set(folder_path, ef, rad)
@@ -285,7 +346,9 @@ def extract_emission_set(folder_path, ef, rad):
             created_lists = True
         for i, mode_dipole in enumerate(mode):
             if 'z_linspace' not in mode_dipole.keys():
-                z_linspace = np.load(os.path.join(folder_path, r'z_linspace_patch.npy'))
+                z_linspace_file = np.load(os.path.join(folder_path, r'z_linspace_patch.npy'))
+                z_linspace = np.copy(z_linspace_file)
+                del(z_linspace_file)
             else:
                 z_linspace = mode_dipole['z_linspace']
             total_k_rate_list[i].append(mode_dipole['total_k_rate'])
@@ -297,10 +360,9 @@ def extract_emission_set(folder_path, ef, rad):
             ef = mode_dipole['Ef']
             rad = mode_dipole['radius']
             dip[i] = (mode_dipole['dipole'] == 2) * 'ULS' + (mode_dipole['dipole'] == 1) * 'INJ'
-            print(i, regular_integration_1d(np.real(mode_dipole['total_k_div_rate']) / regular_integration_1d(dipole_locations(z_linspace), z_linspace), z_linspace) / spont_emission[i])
-            print(i, mode_dipole['Fp_estimation'])
-            print(i, fix_purcell(mode_dipole['f_k'], mode_dipole['f_ij'], mode_dipole['Fp_estimation']))
+
     return z_linspace, spont_emission, total_k_rate_list, total_k_div_rate_list, avg_G_k_list, f_k_list, dip, ef, rad, interp_bandplot
+
 
 def extract_purcells_set(folder_path, ef, rad, fix_fp=False):
     mode_dicts = load_specific_compared_set(folder_path, ef, rad)
@@ -308,6 +370,7 @@ def extract_purcells_set(folder_path, ef, rad, fix_fp=False):
     created_lists = False
 
     for mode in mode_dicts:
+
         if not created_lists:
             theory_purcell_list = [[] for i in range(len(mode))]
             estimated_fp_list = [[] for i in range(len(mode))]
@@ -339,20 +402,24 @@ def fix_purcell(f_k, f_if, purcell):
 
 def check_spatial_frequency(Ek):
     points = Ek.points
-    #u_z = Ek.e_field[:, 2]
+    u_z = Ek.e_field[:, 2]
     x, y, z = points.T
-    u_z = np.sin(2 * np.pi * z / (z.max() - z.min()))
+
     magnitude_z = abs(u_z) ** 2
     avg_z = np.linspace(z.min(), round_micro_meter(z.max(), 4), 10000)
-    magnitude_z = np.cos(np.pi * 10 * z / (z.max() - z.min()))
-    #average_u_z, avg_z = averaging_over_area_non_interp(points, Ek.disk_area, magnitude_z)
-    average_u_z = averaging_over_area(points, Ek.disk_area, avg_z, magnitude_z)
+    #f = np.pi * 12.5 / (z.max() - z.min()) / (2*np.pi)
+    #magnitude_z = np.cos(f * 2 * np.pi * z)
+    #print("cosine freq", f, f / (2* np.pi / z.max() - z.min()))
+    average_u_z, avg_z = averaging_over_area_non_interp(points, Ek.disk_area, magnitude_z)
+    #average_u_z = averaging_over_area(points, Ek.disk_area, avg_z, magnitude_z)
+
+    #average_u_z = np.pad(average_u_z, 51, mode="constant", constant_values=0)
     Nz = len(average_u_z)
     Lz = avg_z.max() - avg_z.min()
     srz = Nz/Lz # srz = sampling rate over z
     Dz = 1.0 / srz # period length
     n_z = np.arange(Nz)
-    kz = n_z / (Nz * Dz) / (2 * np.pi / Lz)
+    kz = n_z / Lz
     U_Z = np.fft.fft(average_u_z)
 
     print(srz / (2 * np.pi/Lz), Dz/ Lz)
@@ -360,8 +427,14 @@ def check_spatial_frequency(Ek):
     plt.plot(z, magnitude_z)
     plt.figure()
     plt.plot(avg_z, average_u_z)
+    f_cos = 5 / (2* np.pi / Lz)
+    test = np.cos(2*np.pi * f_cos * avg_z) * max(average_u_z)
+    COS_Z = np.fft.fft(test)
+    plt.plot(avg_z, test)
     plt.figure()
-    plt.stem(kz, abs(U_Z), use_line_collection='True')
+    plt.stem(kz / (2* np.pi / Lz), abs(U_Z), use_line_collection='True')
+    plt.figure()
+    plt.stem(kz / (2 * np.pi / Lz), abs(COS_Z), 'g', use_line_collection='True')
     plt.show()
 
 
