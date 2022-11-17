@@ -9,10 +9,13 @@ plt.rcParams['svg.fonttype'] = 'none'
 
 
 def cleo_plot(Elist, folder_path, wv_path):
+
+
     #modes_plot(Elist)
     #purcell_factor_plot(Elist, folder_path)
     #cavity_plot()
-    wv_layer_plot(wv_path)
+    wv_layer_plot(wv_path, Elist)
+    #wavefunction_and_field(wv_path, Elist)
     plt.show()
 
 def modes_plot(Elist):
@@ -116,21 +119,23 @@ def wv_layer_plot_with_img(wv_path):
     wvax.text(max(z) * 0.94, max(bandplot) * 0.90, '(c)', fontsize=font_size)
     show_layers(z, lax)
 
-def wv_layer_plot(wv_path):
+def wv_layer_plot(wv_path, Elist):
     fig = plt.figure(figsize=(10, 3))
     font_size = 8
+    nQW = 2
     z, psi_f, psi_uls, psi_inj, bandplot = wavefunction_for_plot(wv_path)
     z = z * 1e9
     gs = gridspec.GridSpec(2, 1, bottom=0.14, hspace=0, left=0.3, right=0.7, height_ratios=[1,1.5])
 
 
     wvax = fig.add_subplot(gs[1])
-    wvax.plot(z, bandplot, label='Bands')
-    wvax.plot(z, psi_f, label=r'|$\psi$$_f$$(z)|^2$')
-    wvax.plot(z, psi_uls, label=r'|$\psi$$_u$$_l$$_s$$(z)|^2$')
-    wvax.plot(z, psi_inj, label=r'|$\psi$$_i$$_n$$_j$$(z)|^2$')
-    wvax.legend(fontsize=font_size, loc='lower right')
-    wvax.set_xlim([min(z), max(z)])
+    wavefunction_and_field(wv_path, Elist, wvax, nQW)
+    #wvax.plot(z, bandplot, label='Bands')
+    #wvax.plot(z, psi_f, label=r'|$\psi$$_f$$(z)|^2$')
+    #wvax.plot(z, psi_uls, label=r'|$\psi$$_u$$_l$$_s$$(z)|^2$')
+    #wvax.plot(z, psi_inj, label=r'|$\psi$$_i$$_n$$_j$$(z)|^2$')
+    #wvax.legend(fontsize=font_size, loc='lower right')
+    #wvax.set_xlim([min(z), max(z)])
     wvax.xaxis.set_tick_params(labelsize=font_size)
     wvax.set_xlabel('z [nm]', fontsize=font_size)
     wvax.set_yticks([])
@@ -166,9 +171,63 @@ def show_layers(z, ax):
     ax.set_xticklabels([])
     ax.set_yticklabels([])
 
+
+def wavefunction_and_field(wv_path, Elist, subplt, nQW):
+    wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
+
+    z_linspace = np.linspace(0, 360e-9, 10000)
+    z_wv = z_wv * 1e-9
+    bandplot[:, 0] = bandplot[:, 0] * 1e-9
+    init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
+    FINAL_STATE = 0  # state 7
+    psi_f = wavetot[:, FINAL_STATE] * np.sqrt(1e9)
+    psi_uls = wavetot[:, init_states[0]] * np.sqrt(1e9)
+    psi_inj = wavetot[:, init_states[1]] * np.sqrt(1e9)
+    z_band = np.array([])
+    band_plot = np.array([])
+    perLen = 30.68e-9
+    f_energy_diff = (levelstot[0] - levelstot[7]) * 1000
+    uls_energy_diff = (levelstot[2] - levelstot[9]) * 1000
+    inj_energy_diff = (levelstot[1] - levelstot[8]) * 1000
+    band_energy_diff = (levelstot[0] - levelstot[7]) * 1000
+    Efield = Elist[3]
+    for i in range(nQW):
+        OFFSET = 0e-9
+        z_qw = z_wv + perLen * i + OFFSET
+        z_per_min = perLen * i
+        z_per_max = perLen * (i+1)
+        interp_psi_f_func = interpolate.interp1d(z_qw, abs(psi_f) ** 2, kind='cubic',
+                                                 fill_value=0, bounds_error=False)
+        interp_psi_uls_func = interpolate.interp1d(z_qw, abs(psi_uls) ** 2, kind='cubic',
+                                                 fill_value=0, bounds_error=False)
+        interp_psi_inj_func = interpolate.interp1d(z_qw, abs(psi_inj) ** 2, kind='cubic',
+                                                 fill_value=0, bounds_error=False)
+        interp_bandplot_func = interpolate.interp1d(bandplot[:,0] + perLen * i + OFFSET, bandplot[:,1], kind='linear',
+                                                 fill_value=0, bounds_error=False)
+        periods_args = np.logical_and(z_linspace >= (z_qw).min(), z_linspace < (z_qw).max())
+        band_period = np.logical_and(z_linspace >= z_per_min, z_linspace <= z_per_max)
+
+        interp_psi_f = interp_psi_f_func(z_linspace) / 2e6 - f_energy_diff * i + levelstot[0] * 1000
+        interp_psi_uls = interp_psi_uls_func(z_linspace) / 2e6 - uls_energy_diff * i + levelstot[2] * 1000
+        interp_psi_inj = interp_psi_inj_func(z_linspace) / 2e6 - inj_energy_diff * i + levelstot[2] * 1000
+        interp_bandplot = interp_bandplot_func(z_linspace) - band_energy_diff * i #+ levelstot[0] * 10
+        z_band = np.concatenate([z_band, z_linspace[band_period]])
+        band_plot = np.concatenate([band_plot, interp_bandplot[band_period]])
+        if i % 2 == 0:
+            linestyle = 'solid'
+        else:
+            linestyle = 'dashed'
+        subplt.plot(z_linspace[periods_args] * 1e9, interp_psi_f[periods_args], 'orange', linestyle=linestyle)
+        subplt.plot(z_linspace[periods_args] * 1e9, interp_psi_uls[periods_args], 'green', linestyle=linestyle)
+        subplt.plot(z_linspace[periods_args]  *1e9, interp_psi_inj[periods_args], 'red', linestyle=linestyle)
+    subplt.plot(z_band * 1e9, band_plot, 'k')
+    z_linspace, Ez = Efield.return_z_field()
+    subplt.plot(z_linspace * 1e9, Ez[::-1] * 10, 'b')
+    subplt.set_xlim([0, z_band.max() * 1e9])
+
 def wavefunction_for_plot(wv_path):
     wavetot, z_wv, levelstot, bandplot = load_wavefunction(wv_path)
-    z_linspace = np.linspace(0, 30.68e-9, 10000)
+    z_linspace = np.linspace(0, 2 * 30.68e-9, 10000)
     z_wv = z_wv * 1e-9
     bandplot[:, 0] = bandplot[:, 0] * 1e-9
     init_states = [2, 1]  # states 0, 8 -> [2 (ULS), 1 (Injector)]
@@ -207,11 +266,6 @@ def modes_tight_polat(Elist):
         splt.set_xticklabels([])
         splt.set_yticklabels([])
         splt.text(min(xa / 1e-6) * 0.97, max(ya / 1e-6) * 0.97, s[idx], fontsize=font_size, va='top', ha='left')
-        #splt.set_title(r'{} $f_k$={}THz'.format(s[idx], Efield.freq_str), fontsize=font_size)
-        #splt.set_xlabel(r'x [$\mu$m]', fontsize=font_size, labelpad=-1.2)
-        #splt.set_ylabel(r'y [$\mu$m]', fontsize=font_size, labelpad=-6)
-        #splt.xaxis.set_tick_params(labelsize=font_size)
-        #splt.yaxis.set_tick_params(labelsize=font_size)
         ims.append(im)
     cax = fig.add_subplot(gs[1])
     cbar = plt.colorbar(im, cax, ticks=[0, 10])
