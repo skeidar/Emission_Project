@@ -438,4 +438,146 @@ def check_spatial_frequency(Ek):
     plt.show()
 
 
+def plot_fp_omega_k_behave(folder_path, ef, rad):
+    z_linspace, spont_emission, _, total_k_div_rate_list, avg_G_k_list, f_k_list, dip, ef, rad, interp_bandplot = extract_emission_set(
+        folder_path, ef, rad)
+    dip_colors = ['green', 'red']
+    dz_normalize = regular_integration_1d(dipole_locations(z_linspace), z_linspace)
+    f_k = np.linspace(3.2, 4.8, 10000) * 1e12
+    w_k = f_k * 2 * np.pi
+    Q = 10.3
+    f = [4.28e12, 3.58e12]
+    for dipole in range(2):
+        fp_list = []
+        G_norm = remove_w_k_dependency(avg_G_k_list[dipole][0], z_linspace, f_k_list[dipole][0], Q, f[dipole], spont_emission[dipole], dz_normalize)
+        for i, mode in enumerate(total_k_div_rate_list[dipole]):
+            mode_rate = mode / spont_emission[dipole] / dz_normalize
+            rate = regular_integration_1d(np.real(mode_rate), z_linspace)
+            fp_list.append(rate)
+            #print(dip[dipole], rate, f_k_list[dipole][i]/1e12)
+        w = f[dipole] * 2 * np.pi
+        modes_f = np.array(f_k_list[dipole])
+        expected_dip_apx = G_norm * lorentzian_w_func(w_k, Q, w)
+        plt.plot(f_k / 1e12, expected_dip_apx, color=dip_colors[dipole])
+        plt.plot(modes_f / 1e12, fp_list, 'o', linestyle='dashed', color=dip_colors[dipole])
+        plt.xlabel('$f_k$ [THz]')
+        plt.ylabel('Emission enhancement [1]')
+    plt.legend(['Dipole apprx. ULS', 'Non-dipole ULS', 'Dipole apprx. INJ', 'Non-dipole INJ'], fontsize=8)
+    plt.show()
+
+def lorentzian_w_func(w_k, Q, w_if):
+    eps_r = np.real(disspersion(freq2energy(w_k / 2 / np.pi))[1])
+    return (4 * Q * w_k ** 2) / ((eps_r ** 2) * ((2 * Q * (w_k - w_if)) ** 2 + (w_k) ** 2))
+
+def remove_w_k_dependency(Gamma_k, z_linspace, f_k, Q, f_if, spont_emission, dz_normalize):
+    w_k = 2 * np.pi * f_k
+    w_if = 2 * np.pi * f_if
+    lorentzian_term = lorentzian_w_func(w_k, Q, w_if)
+    G_k = regular_integration_1d(Gamma_k / spont_emission / dz_normalize, z_linspace)
+    return G_k / lorentzian_term
+
+
+def fp_omega_k_behave_idea(folder_path, ef, rad):
+    z_linspace, spont_emission, _, total_k_div_rate_list, avg_G_k_list, f_k_list, dip, ef, rad, interp_bandplot = extract_emission_set(
+        folder_path, ef, rad)
+    dip_colors = ['green', 'red']
+
+    dz_normalize = regular_integration_1d(dipole_locations(z_linspace), z_linspace)
+    for dipole in range(2):
+        fp_list = []
+        for i, mode in enumerate(total_k_div_rate_list[dipole]):
+            mode_rate = mode /  spont_emission[dipole] / dz_normalize
+            rate = regular_integration_1d(np.real(mode_rate), z_linspace)
+            fp_list.append(rate)
+            print(dip[dipole], rate, f_k_list[dipole][i]/1e12)
+        f_k = np.linspace(3.2, 4.8, 10000) * 1e12
+        w_k = f_k * 2 * np.pi
+        Q = 12
+        f = [4.28e12, 3.58e12]
+        w = f[dipole] * 2 * np.pi
+        #modes_f = np.array([3.58, 3.62, 3.93, 4.04, 4.13, 4.19]) * 1e12 # for ef = 0.15, rad = 2.2um
+        modes_f = np.array([3.41, 3.82, 4.23, 4.34, 4.47, 4.52]) * 1e12 # for ef = 0.2, rad = 2.6um
+        modes_f = f_k_list[dipole]
+        #hard_coded_Fp = np.array([[82.32, 70, 272.75, 415.66, 475.54, 756.03],[1598.75, 1111.08, 306.55, 186.07, 98.55, 104.32]]) # for ef = 0.15, rad = 2.2um
+        hard_coded_Fp = np.array([[43, 131, 669.75, 590, 238, 248], [657, 394, 75, 54, 28, 33]]) # for ef = 0.2, rad = 2.6um
+        hard_coded_Fp = fp_list
+
+        n_hard_coded_Fp = hard_coded_Fp / max(hard_coded_Fp)
+
+        eps_r = 3
+        res = (4 * Q * w_k  ** 2) / ((cn.hbar * cn.epsilon_0 * (eps_r ** 2) * np.pi) * (4 * ((Q * (w - w_k)) ** 2) + w_k ** 2))
+        A = regular_integration_1d(res, w_k)
+        res = res / max(res)
+        plt.plot(f_k, res, color=dip_colors[dipole])
+        plt.plot(modes_f, n_hard_coded_Fp, '*', linestyle='dashed', color=dip_colors[dipole])
+    plt.show()
+
+
+def ef_rad_summary():
+    ef = np.array([0.15, 0.2, 0.25])
+    rad = np.array([2.2, 2.6, 3.0])
+    fp_list = np.array([[2070, 0, 1260], [1924, 1921, 1349], [1300, 1340, 1110]])
+    dip_list = np.array([[530, 0, 330], [580, 605, 420], [390, 430, 370]])
+    fig = plt.figure(figsize=(8, 3))
+    ax1 = fig.add_subplot(111, projection='3d')
+    width = 0.01
+
+    yticks = [2.2, 2.6, 3.0]
+
+    patches_fp = []
+    patches_dip = []
+    for j in range(len(rad)):
+        patches_fp.append(ax1.bar(ef - width / 2, fp_list[:, j], zs=rad[j], zdir='y', width=width, color='C0'))
+        patches_dip.append(ax1.bar(ef + width / 2, dip_list[:, j], zs=rad[j], zdir='y', width=width, color='C1'))
+
+    ax1.set_xlabel('$E_f$ [eV]', labelpad=10, fontsize=8)
+    ax1.set_xticks([0.15, 0.2, 0.25])
+    ax1.set_xticklabels(['0.15', '0.20', '0.25'], fontsize=8)
+    ax1.set_ylabel(r'radius [$\mu$m]', labelpad=4, fontsize=8)
+    ax1.set_yticks(yticks)
+    ax1.set_zticks(np.linspace(0, 2000, 5))
+    ax1.set_yticklabels(['2.2', '2.6', '3.0'], fontsize=8)
+    plt.legend(['Non-dipole', 'Dipole-approx.'], loc='upper left')
+    plt.show()
+
+def dipole_sweep(folder_path, ef, rad):
+    total = True
+    z_linspace, spont_emission, _, total_k_div_rate_list, avg_G_k_list, f_k_list, dip, ef, rad, interp_bandplot = extract_emission_set(
+        folder_path, ef, rad)
+    dip_val = [2.818e-9, 3.077e-9]
+    dip_sweep = np.linspace(3e-9, 10.5e-9, 10000)
+    for i, dipole in enumerate(dip):
+        if total:
+            gamma_k = np.real(np.sum(avg_G_k_list[i],0))
+            spont = spont_emission[i]
+            non_dip_k = np.real(np.sum(total_k_div_rate_list[i],0))
+            max_gk = max(gamma_k)
+            max_non_dip = max(non_dip_k)
+            reduce_gk = max_gk / abs(dip_val[i]) ** 2 * abs(dip_sweep) ** 2
+            plt.plot(dip_sweep / 1e-9, reduce_gk / spont)
+            plt.axhline(max_non_dip / spont, linestyle='dashed', color='red')
+            plt.xlabel('dipole [nm]')
+            plt.ylabel('Enhancement [1]')
+            plt.show()
+        else:
+            gamma_k_list = np.real(avg_G_k_list[i])
+            spont = spont_emission[i]
+            non_dip_k = np.real(total_k_div_rate_list[i])
+            clist = ['C{}'.format(k) for k in range(len(f_k_list[i]))]
+            for k in range(len(f_k_list[i])):
+                max_gk = max(gamma_k_list[k])
+                max_non_dip = max(non_dip_k[k])
+                reduce_gk = max_gk / abs(dip_val[i]) ** 2 * abs(dip_sweep) ** 2
+                plt.plot(dip_sweep / 1e-9, reduce_gk / spont, label='{}THz'.format(np.round(f_k_list[i][k] / 1e12,2)), color=clist[k])
+                plt.axhline(max_non_dip / spont, linestyle='dashed', color=clist[k])
+                plt.xlabel('dipole [nm]')
+                plt.ylabel('Enhancement [1]')
+                star_idx = 0
+                for n,rate in enumerate(reduce_gk):
+                    if n != len(reduce_gk) - 1 and rate <= max_non_dip and reduce_gk[n+1] >= max_non_dip:
+                        star_idx = n
+                plt.plot(dip_sweep[star_idx] / 1e-9, reduce_gk[star_idx] / spont, 'o', color='k')
+            plt.legend()
+            plt.show()
+
 

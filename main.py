@@ -22,8 +22,10 @@ if __name__ == "__main__":
     #f_array = np.linspace(3e12, 4.8e12, 11)
     # f_array = np.linspace(3e12, 4.8e12, 301)
     e_path = r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\Ef-0.25eV_2.2um"
+    e_path2 = r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.2eV\Ef-0.2eV_2.6um"
 
     E = load_modes(r"C:\Shaked\Technion\QCL_Project\Electrical Field\EM_spatial-distribution\E_f-0.15eV\Ef-0.15eV_2.2um")
+    E2 = load_modes(e_path2)
     #E = load_modes(e_path)
 
     Ek = E[0]
@@ -42,7 +44,6 @@ if __name__ == "__main__":
     field_k = Ek.e_field
 
 
-
     folder_path = r'C:\Shaked\Technion\QCL_Project\Electrical Field\Scripts\data\071122_gamma_compare'
     #compare_Gamma_k_methods(Ek, wv_path, plz_plot=True)
     #print_purcell_per_set(folder_path, ef=0.25, rad=2.2, fix_fp=True)
@@ -51,5 +52,6 @@ if __name__ == "__main__":
     #print_every_purcell(folder_path, fix_fp=True)
     #plot_total_set(folder_path, ef=0.15, rad=2.2)
     cleo_plot(E, folder_path, wv_path)
-
+    #plot_fp_omega_k_behave(folder_path, ef=0.15, rad=2.2)
+    #ef_rad_summary()
     #check_spatial_frequency(E[0])
