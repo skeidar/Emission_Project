@@ -46,6 +46,32 @@ def create_func_dict(points, func):
             f[x] = {y : {z : func[i]}}
     return f   
 
+def create_rounded_func_dict(points, func):
+    f = dict()
+    z_val_count = 0
+    for i,p in enumerate(points):
+        x, y, z = p
+        x = round_num(x, 2)
+        y = round_num(y, 2)
+        z = round_num(z, 2)
+        if x in f.keys():
+            if y in f[x].keys():
+                if z in f[x][y].keys():
+                    # changed the logic so the func_dict will contain the mean value for each z and not a single value
+                    prev_val = f[x][y][z]
+                    new_val = ((prev_val * z_val_count) + func[i]) / (z_val_count + 1)
+                    z_val_count += 1
+                    f[x][y][z] = new_val
+                    #pass
+                else:
+                    f[x][y][z] = func[i]
+                    z_val_count = 1
+            else:
+                f[x][y] = {z: func[i]}
+        else:
+            f[x] = {y : {z : func[i]}}
+    return f
+
 def create_dict_by_z(points, func):
     points_dict = {}
     for i,p in enumerate(points):

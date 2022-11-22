@@ -62,8 +62,18 @@ class Wavefunction(object):
         else:
             plt.figure()
             plt.plot(z, energy_band)
-            for i in range(Nper * 3):
-                plt.plot(z, wavefuncs[:,i])
+            for i in range(Nper * 2):#3):
+                color = 'gray'
+                style = "solid"
+                if i == 0 or i==7:
+                    color='orange'
+                if i == 1 or i==8:
+                    color= 'red'
+                if i==2 or i==9:
+                    color = 'green'
+                if i > 6:
+                    style = 'dashed'
+                plt.plot(z, wavefuncs[:,i], color=color, linestyle=style)
         plt.title("{} Wavefunctions".format(self.name))
         plt.xlabel('z [nm]')
         #plt.ylabel('E [meV]')
@@ -336,7 +346,11 @@ if __name__ == "__main__":
             dip = regular_integration_1d(psi_i * psi_f * z_wv,z_wv)
             if 2.7 <= dip <= 3.4:
                 print(dip, i, j, levelstot[j] - levelstot[i], energy2freq(levelstot[j] - levelstot[i]) / 1e12)
-                plt.plot(z_wv, abs(psi_f) ** 2 + levelstot[i], z_wv, abs(psi_i) ** 2 + levelstot[j])
+    z_linspace = np.linspace(0,360e-9,1000)
+
+    wv = Wavefunction('APL_2019')
+    wv.plot_dat()
+
     #plt.show()
     #testing_shifts_APL()
 

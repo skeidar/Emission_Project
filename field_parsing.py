@@ -203,22 +203,25 @@ class ElectricMode(object):
             plt.ylabel(r"z [m]")
         plt.show()
 
-    def return_polar(self):
+    def return_polar(self, z_val=None, Np=1000):
         e_norms = self.e_norms
+        e_field = self.e_field[:,2]
+        print(self.freq_str)
         x, y, z = self.points.T
         # finding the polar image in z values
         polar_norms_max = []
-
+        if z_val is None:
+            z_val = z.min()
         for i, zi in enumerate(z):
             # z=360nm (the z axis is inverted) # changed from zi==0
-            if round_num(zi, 2) == round_num(z.min(), 2):
-                polar_norms_max.append([x[i], y[i], e_norms[i]])
+            if round_num(zi, 2) == round_num(z_val, 2):
+                polar_norms_max.append([x[i], y[i], abs(e_field[i]) ** 2])
         polar_norms_max = np.array(polar_norms_max).T
         x_norms, y_norms, norms_func_max = polar_norms_max
 
         # create x-y points to be used in heatmap
-        xa = np.linspace(x_norms.min(), x_norms.max(), 1000)
-        ya = np.linspace(y_norms.min(), y_norms.max(), 1000)
+        xa = np.linspace(x_norms.min(), x_norms.max(), Np)
+        ya = np.linspace(y_norms.min(), y_norms.max(), Np)
 
         # Interpolate for plotting
         zg_max = griddata((x_norms, y_norms), norms_func_max, (xa[None, :], ya[:, None]), method='cubic')
@@ -308,12 +311,14 @@ class ElectricMode(object):
         return fig
 
     def return_z_field(self):
+        # returning the average |E_z(z)|^2 along z
         e_norms = self.e_norms
         x, y, z = self.points.T
         # finding the polar image in z values
-
+        Ez = self.e_field[:,2]
         zi = np.linspace(z.min(), round_micro_meter(z.max(), 4), 1000)
-        Ez_interp_res = averaging_over_area(self.points, self.disk_area, zi, e_norms)
+        #Ez_interp_res = averaging_over_area(self.points, self.disk_area, zi, e_norms)
+        Ez_interp_res = averaging_over_area(self.points, self.disk_area, zi, abs(Ez) ** 2, kind='cubic')
         return zi, Ez_interp_res
 
     def Epolar_Ez_plot(self):
